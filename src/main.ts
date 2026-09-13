@@ -292,6 +292,13 @@ window.wargame = {
     return {
       time: Number(sim.time.toFixed(2)),
       missionState: sim.missionState,
+      camera: {
+        yaw: Number(iso.currentYaw.toFixed(4)),
+        x: Number(iso.camera.position.x.toFixed(2)),
+        z: Number(iso.camera.position.z.toFixed(2)),
+        focusX: Number(iso.focus.x.toFixed(2)),
+        focusZ: Number(iso.focus.z.toFixed(2)),
+      },
       units: sim.unitList.map((u) => ({
         id: u.id,
         name: u.name,

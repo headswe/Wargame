@@ -63,3 +63,30 @@ test('panning moves the view the way the input says, at every rotation', () => {
     );
   }
 });
+
+test('Q and E swing the camera the way the key sits, at every rotation', () => {
+  // Regression: rotate() added to yaw, but the camera's velocity as yaw rises
+  // is -right, so winding yaw up walked it LEFT. E was bound to rotate(+1) and
+  // therefore swung left, disagreeing with D panning right.
+  for (let start = 0; start < 8; start++) {
+    const iso = new IsoCamera();
+    iso.resize(1600, 900);
+    iso.rotate(start);
+    settle(iso);
+
+    // Measured before the swing: this is the direction "right" means to the
+    // player at the moment they press the key.
+    const { right } = screenBasis(iso);
+    const before = iso.camera.position.clone();
+
+    iso.rotate(1);
+    settle(iso);
+
+    const moved = iso.camera.position.clone().sub(before).setY(0);
+    assert.ok(
+      moved.dot(right) > 1,
+      `rotate(+1) should swing the camera to its right at yaw step ${start}, ` +
+        `got dot ${moved.dot(right).toFixed(2)}`,
+    );
+  }
+});

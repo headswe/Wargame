@@ -49,8 +49,16 @@ export class IsoCamera {
     this.focusTarget.addScaledVector(forward, dy);
   }
 
+  /**
+   * Swing the camera around the focus in 45-degree steps. Positive steps go to
+   * the camera's own right, so E agrees with D and Q agrees with A.
+   *
+   * The step is subtracted because the camera's velocity as yaw increases is
+   * -right: winding yaw up walks it to the LEFT. Adding here is what made Q and
+   * E feel backwards.
+   */
   rotate(steps: number): void {
-    this.yawTarget += (steps * Math.PI) / 4;
+    this.yawTarget -= (steps * Math.PI) / 4;
   }
 
   zoomBy(delta: number): void {
