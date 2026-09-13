@@ -11,6 +11,7 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true,
+    "types": ["node"],
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
     "noEmit": true,

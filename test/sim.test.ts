@@ -5,7 +5,7 @@ import { COLD_HARBOUR } from '../src/sim/levels.ts';
 import { Tile, parseLevel } from '../src/sim/world.ts';
 import { findPath } from '../src/sim/pathfind.ts';
 import { hasLineOfSight } from '../src/sim/los.ts';
-import { Sim, MissionState } from '../src/sim/sim.ts';
+import { Sim } from '../src/sim/sim.ts';
 import { Faction, MoveMode, UnitState, WEAPONS, makeUnit } from '../src/sim/units.ts';
 import { coverAgainst } from '../src/sim/combat.ts';
 
@@ -67,7 +67,7 @@ test('firing ports let sight through but not bodies', () => {
 test('cover is directional and leaning out costs you some of it', () => {
   const world = parseLevel(COLD_HARBOUR.rows);
   const node = world.coverNodes.find((n) => n.arcs.length === 1 && n.best > 0.7);
-  assert.ok(node, 'expected a node with a single full-height arc');
+  if (!node) throw new Error('expected a node with a single full-height arc');
 
   const unit = makeUnit({
     role: 'Rifleman',
@@ -189,4 +189,22 @@ test('the same seed produces the same mission', () => {
   };
   assert.equal(play(2024), play(2024));
   assert.notEqual(play(2024), play(2025));
+});
+
+test('nobody is under fire on the start line', () => {
+  // Regression: a guard covering the west breach also had a clean line onto
+  // ALPHA's spawn, so the mission opened with casualties before the player had
+  // touched anything. Blast walls inside each breach cut that line.
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const sim = new Sim(COLD_HARBOUR, seed);
+    for (let i = 0; i < 60 * 6; i++) sim.update(1 / 60);
+
+    for (const u of sim.unitList) {
+      if (u.faction !== Faction.Player) continue;
+      assert.equal(
+        u.hp, u.maxHp,
+        `${u.name} took fire on the start line before receiving an order (seed ${seed})`,
+      );
+    }
+  }
 });
