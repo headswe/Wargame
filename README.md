@@ -8,6 +8,12 @@ Currently a playable single-mission prototype — greybox geometry, no meta laye
 yet. The tactical layer is the part worth getting right first; everything else
 is decoration on top of it.
 
+**Play it: https://headswe.github.io/Wargame/**
+
+Every push to the default branch runs the simulation tests and, if they pass,
+deploys. The build uses a relative `base`, so it works from the project subpath
+GitHub Pages serves from without hardcoding the repository name.
+
 ## Running it
 
 ```bash
