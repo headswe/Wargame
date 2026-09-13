@@ -42,7 +42,9 @@ export class IsoCamera {
   /** Pan in screen space, so dragging right always moves the map right. */
   panScreen(dx: number, dy: number): void {
     const forward = new THREE.Vector3(-Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
-    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    // cross(forward, up) with up = +Y. Getting this the wrong way round yields
+    // screen-LEFT, which reads as A and D being swapped at every rotation.
+    const right = new THREE.Vector3(-forward.z, 0, forward.x);
     this.focusTarget.addScaledVector(right, dx);
     this.focusTarget.addScaledVector(forward, dy);
   }
