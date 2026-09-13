@@ -1,0 +1,264 @@
+import { type Vec2 } from './math.ts';
+import type { CoverNode } from './world.ts';
+
+export const Faction = { Player: 0, Hostile: 1 } as const;
+export type Faction = (typeof Faction)[keyof typeof Faction];
+
+export const UnitState = {
+  Active: 0,
+  /** Out of the fight, bleeding out. Still a person you can get back. */
+  Down: 1,
+  Dead: 2,
+} as const;
+export type UnitState = (typeof UnitState)[keyof typeof UnitState];
+
+export const MoveMode = {
+  /** Weapon up, hugs cover, reacts instantly. The default. */
+  Tactical: 0,
+  /** Weapon down, ignores cover, loud. Double right-click. */
+  Sprint: 1,
+} as const;
+export type MoveMode = (typeof MoveMode)[keyof typeof MoveMode];
+
+export const Posture = {
+  Standing: 0,
+  /** In cover, presenting a smaller target. */
+  Crouched: 1,
+  /** Suppressed into the dirt: no shooting, no moving. */
+  Pinned: 2,
+} as const;
+export type Posture = (typeof Posture)[keyof typeof Posture];
+
+export interface Weapon {
+  name: string;
+  damage: number;
+  /** Rounds per minute while a burst is going out. */
+  rpm: number;
+  burst: number;
+  /** Seconds between bursts — the rhythm you hear in a firefight. */
+  burstPause: number;
+  magSize: number;
+  reloadTime: number;
+  /** Hit chance at optimal range against an unsuppressed target in the open. */
+  accuracy: number;
+  optimalRange: number;
+  maxRange: number;
+  /** Fear per round. A SAW is a movement-denial tool, not a killing tool. */
+  suppressionPower: number;
+}
+
+export const WEAPONS: Record<string, Weapon> = {
+  carbine: {
+    name: 'Carbine',
+    damage: 26,
+    rpm: 700,
+    burst: 3,
+    burstPause: 0.75,
+    magSize: 30,
+    reloadTime: 2.6,
+    accuracy: 0.74,
+    optimalRange: 11,
+    maxRange: 28,
+    suppressionPower: 0.9,
+  },
+  saw: {
+    name: 'SAW',
+    damage: 24,
+    rpm: 800,
+    burst: 9,
+    burstPause: 1.15,
+    magSize: 100,
+    reloadTime: 6.0,
+    accuracy: 0.4,
+    optimalRange: 13,
+    maxRange: 32,
+    suppressionPower: 2.7,
+  },
+  dmr: {
+    name: 'DMR',
+    damage: 52,
+    rpm: 240,
+    burst: 1,
+    burstPause: 1.5,
+    magSize: 20,
+    reloadTime: 3.2,
+    accuracy: 0.88,
+    optimalRange: 20,
+    maxRange: 42,
+    suppressionPower: 1.2,
+  },
+  smg: {
+    name: 'SMG',
+    damage: 20,
+    rpm: 900,
+    burst: 5,
+    burstPause: 0.6,
+    magSize: 32,
+    reloadTime: 2.2,
+    accuracy: 0.62,
+    optimalRange: 5,
+    maxRange: 15,
+    suppressionPower: 0.8,
+  },
+  ak: {
+    name: 'AK',
+    damage: 28,
+    rpm: 600,
+    burst: 4,
+    burstPause: 1.0,
+    magSize: 30,
+    reloadTime: 3.4,
+    accuracy: 0.55,
+    optimalRange: 9,
+    maxRange: 26,
+    suppressionPower: 1.0,
+  },
+  pkm: {
+    name: 'PKM',
+    damage: 30,
+    rpm: 650,
+    burst: 10,
+    burstPause: 1.4,
+    magSize: 100,
+    reloadTime: 7.0,
+    accuracy: 0.32,
+    optimalRange: 14,
+    maxRange: 34,
+    suppressionPower: 2.9,
+  },
+};
+
+export type Role = 'Team Leader' | 'Rifleman' | 'Automatic Rifleman' | 'Marksman' | 'Breacher';
+
+export interface Unit {
+  id: number;
+  name: string;
+  role: Role;
+  faction: Faction;
+  /** Index into Sim.squads. Hostiles use their own squad grouping. */
+  squadId: number;
+
+  pos: Vec2;
+  facing: number;
+  velocity: Vec2;
+
+  // Movement
+  path: Vec2[];
+  pathIndex: number;
+  moveMode: MoveMode;
+  /** Where this individual is headed — a cover slot, not the team's order point. */
+  slot: Vec2 | null;
+  claimedNode: CoverNode | null;
+  /** Where to look once settled, if the player dragged a facing. */
+  postFacing: number | null;
+
+  // Condition
+  hp: number;
+  maxHp: number;
+  state: UnitState;
+  bleedout: number;
+  stabilized: boolean;
+  /** 0..1. Drives accuracy loss, then pinning. */
+  suppression: number;
+  stamina: number;
+  posture: Posture;
+  /** 0..1 — how far out of cover they are leaning to shoot. */
+  exposure: number;
+
+  // Weapon handling
+  weapon: Weapon;
+  ammoInMag: number;
+  reloadTimer: number;
+  /** 0..1 — sprinting drops the muzzle; it takes a beat to get back on target. */
+  weaponReady: number;
+  fireCooldown: number;
+  burstRemaining: number;
+  burstPauseTimer: number;
+
+  // Senses
+  targetId: number | null;
+  /** Enemy ids currently acquired — seen well enough to shoot at. */
+  visible: number[];
+  /** Per-enemy spotting progress. Reaching 1 means acquired. */
+  spotting: Map<number, number>;
+  /** Last place we saw each enemy, by id. */
+  memory: Map<number, { pos: Vec2; age: number }>;
+
+  /** Cosmetic: seconds since last shot, for muzzle flash timing in the renderer. */
+  lastShotAt: number;
+  /** Throttles A* retries when a slot is briefly unreachable. */
+  repathTimer: number;
+}
+
+const FIRST = [
+  'Voss', 'Kessler', 'Marek', 'Dunn', 'Aleksy', 'Ruiz', 'Halvorsen', 'Baptiste',
+  'Crane', 'Okafor', 'Sandoval', 'Thorne', 'Novak', 'Reyes', 'Brandt', 'Iversen',
+];
+
+let nextUnitId = 1;
+export function resetUnitIds(): void {
+  nextUnitId = 1;
+}
+
+export function makeUnit(opts: {
+  name?: string;
+  role: Role;
+  faction: Faction;
+  squadId: number;
+  pos: Vec2;
+  weapon: Weapon;
+  facing?: number;
+  maxHp?: number;
+}): Unit {
+  const id = nextUnitId++;
+  return {
+    id,
+    name: opts.name ?? FIRST[id % FIRST.length],
+    role: opts.role,
+    faction: opts.faction,
+    squadId: opts.squadId,
+    pos: { ...opts.pos },
+    facing: opts.facing ?? 0,
+    velocity: { x: 0, y: 0 },
+    path: [],
+    pathIndex: 0,
+    moveMode: MoveMode.Tactical,
+    slot: null,
+    claimedNode: null,
+    postFacing: null,
+    hp: opts.maxHp ?? 100,
+    maxHp: opts.maxHp ?? 100,
+    state: UnitState.Active,
+    bleedout: 0,
+    stabilized: false,
+    suppression: 0,
+    stamina: 1,
+    posture: Posture.Standing,
+    exposure: 1,
+    weapon: opts.weapon,
+    ammoInMag: opts.weapon.magSize,
+    reloadTimer: 0,
+    weaponReady: 1,
+    fireCooldown: 0,
+    burstRemaining: 0,
+    burstPauseTimer: 0,
+    targetId: null,
+    visible: [],
+    spotting: new Map(),
+    memory: new Map(),
+    lastShotAt: 99,
+    repathTimer: 0,
+  };
+}
+
+export const isFighting = (u: Unit): boolean => u.state === UnitState.Active;
+export const isMoving = (u: Unit): boolean =>
+  u.path.length > 0 && u.pathIndex < u.path.length;
+
+/** Movement speed in tiles/second, after stamina and suppression. */
+export function speedOf(u: Unit): number {
+  const base = u.moveMode === MoveMode.Sprint ? 4.3 : 1.75;
+  const staminaFactor = u.moveMode === MoveMode.Sprint ? 0.55 + u.stamina * 0.45 : 1;
+  const supFactor = 1 - u.suppression * 0.45;
+  return base * staminaFactor * supFactor;
+}
