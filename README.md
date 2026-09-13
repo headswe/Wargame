@@ -186,7 +186,33 @@ On a 170 x 130 m village with seven angled buildings:
 navmesh                943 triangles from 680 x 520 cells
 path query             0.127 ms          (mean 1.38x straight-line)
 rebuild after a breach ~12 ms steady state
+sightline              2.12 us over 100 m (~17 ms per second at full load)
 ```
+
+**Cover is one calculation, not a table.** A sightline solves for the lowest
+point on the target that clears every obstruction along the way. An obstruction
+of height `H` at fraction `t` of the way there hides everything below
+`eye + (H - eye) / t`, so the highest such value over the walk is the target's
+waterline: below it hidden, above it exposed. One pass answers "can I see him"
+and "how much of him" together, and a wall, a crest, a ditch lip and a
+crouching man all become the same arithmetic.
+
+What falls out of it, with no special case for any of them:
+
+```
+a man at 100 m                          standing   crouched
+  behind a waist-high wall at his elbow      44%        16%
+  the same wall halfway between you          78%        67%
+  in a 1.6 m ditch                           13%         0%
+  in that ditch, seen from its lip          100%         -
+  behind a low ridge                          0%         -
+  ...from on top of that ridge               100%         -
+```
+
+Hugging your cover matters; cover you are merely near does not. A ditch is
+defilade rather than a bump. Height sees over. And a hedgerow reports 100%
+exposure with 100% concealment — vegetation hides you without stopping a
+single round, which is a distinction the tile world had no way to make.
 
 Two things in there are load-bearing and easy to get wrong:
 
