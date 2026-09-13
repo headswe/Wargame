@@ -19,7 +19,7 @@ export class IsoCamera {
   private yawTarget = this.yaw;
 
   /** Half-height of the view frustum in world units. Smaller is closer in. */
-  private zoom = 12;
+  private zoom = 22;
   private zoomTarget = this.zoom;
 
   private readonly elevation = (39 * Math.PI) / 180;
@@ -62,7 +62,7 @@ export class IsoCamera {
   }
 
   zoomBy(delta: number): void {
-    this.zoomTarget = THREE.MathUtils.clamp(this.zoomTarget * (1 + delta), 6, 30);
+    this.zoomTarget = THREE.MathUtils.clamp(this.zoomTarget * (1 + delta), 6, 60);
   }
 
   clampFocus(width: number, height: number): void {

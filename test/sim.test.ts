@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COLD_HARBOUR } from '../src/sim/levels.ts';
+
+const ASCII_ROWS = COLD_HARBOUR.rows!;
 import { Tile, parseLevel } from '../src/sim/world.ts';
 import { findPath } from '../src/sim/pathfind.ts';
 import { hasLineOfSight } from '../src/sim/los.ts';
@@ -10,12 +12,12 @@ import { Faction, MoveMode, UnitState, WEAPONS, makeUnit } from '../src/sim/unit
 import { coverAgainst } from '../src/sim/combat.ts';
 
 test('level rows are rectangular and the map is sealed', () => {
-  const width = COLD_HARBOUR.rows[0].length;
-  for (const [i, row] of COLD_HARBOUR.rows.entries()) {
+  const width = ASCII_ROWS[0].length;
+  for (const [i, row] of ASCII_ROWS.entries()) {
     assert.equal(row.length, width, `row ${i} is ${row.length} wide, expected ${width}`);
   }
 
-  const world = parseLevel(COLD_HARBOUR.rows);
+  const world = parseLevel(ASCII_ROWS);
   for (let y = 0; y < world.height; y++) {
     assert.ok(!world.walkable(0, y), `hole in west border at (0,${y})`);
     assert.ok(!world.walkable(world.width - 1, y), `hole in east border at (${world.width - 1},${y})`);
@@ -29,7 +31,7 @@ test('level rows are rectangular and the map is sealed', () => {
 test('every walkable tile is reachable from every squad spawn', () => {
   // Regression: A* re-expanded stale heap entries until it hit its own budget,
   // so reachable cover came back unreachable and squads silently ignored orders.
-  const world = parseLevel(COLD_HARBOUR.rows);
+  const world = parseLevel(ASCII_ROWS);
   const start = world.spawns.teams[0][0];
 
   let checked = 0;
@@ -46,7 +48,7 @@ test('every walkable tile is reachable from every squad spawn', () => {
 });
 
 test('firing ports let sight through but not bodies', () => {
-  const world = parseLevel(COLD_HARBOUR.rows);
+  const world = parseLevel(ASCII_ROWS);
   let ports = 0;
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
@@ -65,7 +67,7 @@ test('firing ports let sight through but not bodies', () => {
 });
 
 test('cover is directional and leaning out costs you some of it', () => {
-  const world = parseLevel(COLD_HARBOUR.rows);
+  const world = parseLevel(ASCII_ROWS);
   const node = world.coverNodes.find((n) => n.arcs.length === 1 && n.best > 0.7);
   if (!node) throw new Error('expected a node with a single full-height arc');
 
@@ -83,21 +85,21 @@ test('cover is directional and leaning out costs you some of it', () => {
   const protectedSide = { x: node.pos.x + dir.x * 8, y: node.pos.y + dir.y * 8 };
   const openSide = { x: node.pos.x - dir.x * 8, y: node.pos.y - dir.y * 8 };
 
-  const front = coverAgainst(unit, protectedSide);
-  const behind = coverAgainst(unit, openSide);
+  const front = coverAgainst(world, unit, protectedSide);
+  const behind = coverAgainst(world, unit, openSide);
   assert.ok(front > 0.7, `cover from the protected side should be strong, got ${front}`);
   assert.equal(behind, 0, `cover from behind should be nothing, got ${behind}`);
 
   unit.exposure = 1;
   assert.ok(
-    coverAgainst(unit, protectedSide) < front,
+    coverAgainst(world, unit, protectedSide) < front,
     'leaning out to shoot should give up some cover',
   );
 
   // Cover you are merely walking toward is not cover you have.
   unit.exposure = 0;
   unit.pos = { x: node.pos.x + 3, y: node.pos.y };
-  assert.equal(coverAgainst(unit, protectedSide), 0);
+  assert.equal(coverAgainst(world, unit, protectedSide), 0);
 });
 
 test('two operators in cover still spot each other at range', () => {

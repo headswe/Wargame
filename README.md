@@ -116,6 +116,45 @@ o  low cover — blocks movement, shoot over it, good protection
 X  objective
 ```
 
+## Two scales, one ruleset
+
+`Cold Harbour` is a 73 m walled compound — the close-quarters mission, where the
+median clear line of sight from the start is **6 m**. `Stepove` is a 170 m
+village where that same measurement is **68 m**, and first contact happens at a
+median of 47 m.
+
+That gap is the point. Weapon ranges, spotting and movement are tuned once, for
+both, because a contract should be able to be an office block or a field in
+Ukraine without changing the rules underneath.
+
+## Destruction
+
+Walls have hit points and a material. Rounds that go wide put their energy into
+the scenery, and cover wears out in two stages:
+
+```
+wall  ──fire──▶  rubble  ──fire──▶  open ground
+      blocks           blocks           passable
+      sight            movement         breach
+```
+
+The middle stage is the interesting one: a wall you were safe behind becomes
+something you can both shoot over, and a position turns from cover into a
+firefight without anybody moving. Cover value falls continuously with integrity
+as well, so a battered wall is worth measurably less before it collapses.
+
+Small arms **degrade** cover; they rarely breach it. Putting a hole through
+masonry is what explosives are for, and indirect fire is not in yet.
+
+## Levels are authored two ways
+
+Tight interiors stay ASCII — a floorplan you can read in a diff. Anything at
+village scale is painted from primitives (`src/sim/levelgen.ts`): thick line
+segments at any angle, buildings at any rotation, scattered cover. That is what
+lets a hedgerow run at 23 degrees instead of snapping to the compass, and it is
+deliberately the shape the world wants to become — vector geometry rasterised
+for the simulation.
+
 ## What is deliberately not here yet
 
 - **The PMC layer** — contracts, payroll, gear, a persistent roster. This is

@@ -1,7 +1,7 @@
 import { type Vec2, dist, vec } from './math.ts';
 import { Rng } from './rng.ts';
-import { Tile, World, parseLevel } from './world.ts';
-import type { LevelDef } from './levels.ts';
+import { Tile, World } from './world.ts';
+import { createWorld, type LevelDef } from './levels.ts';
 import {
   Faction, MoveMode, UnitState, WEAPONS, type Role, type Unit, makeUnit, resetUnitIds,
 } from './units.ts';
@@ -13,10 +13,10 @@ export const MissionState = { InProgress: 0, Won: 1, Lost: 2 } as const;
 export type MissionState = (typeof MissionState)[keyof typeof MissionState];
 
 /** Vision is recomputed on its own clock; nothing needs it at 60 Hz. */
-const VISIBILITY_HZ = 10;
-const VISION_RANGE = 27;
+const VISIBILITY_HZ = 7;
+const VISION_RANGE = 85;
 const CONE_HALF = (58 * Math.PI) / 180;
-const AWARENESS_RADIUS = 5.5;
+const AWARENESS_RADIUS = 7;
 
 const TEAM_NAMES = ['ALPHA', 'BRAVO', 'CHARLIE'];
 const FIRETEAM: { role: Role; weapon: keyof typeof WEAPONS }[] = [
@@ -51,7 +51,7 @@ export class Sim implements SimContext {
   private visibilityTimer = 0;
 
   constructor(level: LevelDef, seed = 1337) {
-    this.world = parseLevel(level.rows);
+    this.world = createWorld(level);
     this.rng = new Rng(seed);
     this.visibleTiles = new Uint8Array(this.world.width * this.world.height);
     this.exploredTiles = new Uint8Array(this.world.width * this.world.height);
@@ -139,7 +139,7 @@ export class Sim implements SimContext {
     };
     if (pick(here)) return;
     const nearby = this.world
-      .coverNear(u.pos, 2.5)
+      .coverNear(u.pos, 4)
       .filter((n) => n.claimedBy === null)
       .sort((a, b) => b.best - a.best);
     for (const node of nearby) if (pick(node)) return;
@@ -239,11 +239,11 @@ export class Sim implements SimContext {
 
       this.markDisc(u.pos, AWARENESS_RADIUS);
 
-      const step = (2 * Math.PI) / 180;
+      const step = (2.4 * Math.PI) / 180;
       for (let a = u.facing - CONE_HALF; a <= u.facing + CONE_HALF; a += step) {
         const dx = Math.cos(a);
         const dy = Math.sin(a);
-        for (let r = 0; r <= VISION_RANGE; r += 0.6) {
+        for (let r = 0; r <= VISION_RANGE; r += 1.1) {
           const tx = Math.floor(u.pos.x + dx * r);
           const ty = Math.floor(u.pos.y + dy * r);
           if (!this.world.inBounds(tx, ty)) break;

@@ -8,6 +8,8 @@ export interface TraceResult {
   lowCrossed: number;
   /** Where the line met a wall, if it did. */
   hit: Vec2 | null;
+  /** Which tile it struck — what destruction needs to know. */
+  hitTile: { tx: number; ty: number } | null;
 }
 
 /**
@@ -42,7 +44,7 @@ export function trace(world: World, from: Vec2, to: Vec2, sightOnly = true): Tra
   const maxSteps = world.width + world.height + 4;
 
   while (guard++ < maxSteps) {
-    if (tx === endX && ty === endY) return { clear: true, lowCrossed, hit: null };
+    if (tx === endX && ty === endY) return { clear: true, lowCrossed, hit: null, hitTile: null };
 
     let t: number;
     if (tMaxX < tMaxY) {
@@ -54,10 +56,10 @@ export function trace(world: World, from: Vec2, to: Vec2, sightOnly = true): Tra
       t = tMaxY;
       tMaxY += tDeltaY;
     }
-    if (t > 1) return { clear: true, lowCrossed, hit: null };
+    if (t > 1) return { clear: true, lowCrossed, hit: null, hitTile: null };
 
     const tile = world.at(tx, ty);
-    if (tx === endX && ty === endY) return { clear: true, lowCrossed, hit: null };
+    if (tx === endX && ty === endY) return { clear: true, lowCrossed, hit: null, hitTile: null };
 
     const blocked = sightOnly ? blocksSight(tile) : blocksMove(tile);
     if (blocked) {
@@ -65,12 +67,13 @@ export function trace(world: World, from: Vec2, to: Vec2, sightOnly = true): Tra
         clear: false,
         lowCrossed,
         hit: { x: from.x + dx * t, y: from.y + dy * t },
+        hitTile: { tx, ty },
       };
     }
     if (tile === Tile.Low) lowCrossed++;
   }
 
-  return { clear: true, lowCrossed, hit: null };
+  return { clear: true, lowCrossed, hit: null, hitTile: null };
 }
 
 /** Can a bullet or an eye get from a to b? */

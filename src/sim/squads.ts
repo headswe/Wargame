@@ -25,7 +25,7 @@ export interface Squad {
 }
 
 /** How far from the order point an operator will range to find real cover. */
-const COVER_SEARCH_RADIUS = 5;
+const COVER_SEARCH_RADIUS = 9;
 /** Operators any closer than this share a grenade. */
 const MIN_SPACING = 1.6;
 

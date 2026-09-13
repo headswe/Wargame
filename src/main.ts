@@ -2,13 +2,13 @@ import * as THREE from 'three';
 
 import './ui/style.css';
 
-import { COLD_HARBOUR } from './sim/levels.ts';
+import { STEPOVE } from './sim/levels.ts';
 import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
 import type { Vec2 } from './sim/math.ts';
 
 import { IsoCamera } from './render/camera.ts';
-import { buildLevel, buildLighting } from './render/level.ts';
+import { LevelView, buildLighting } from './render/level.ts';
 import { UnitViews } from './render/units.ts';
 import { FogOfWar } from './render/fog.ts';
 import { Effects } from './render/effects.ts';
@@ -38,6 +38,7 @@ const iso = new IsoCamera();
 class Mission {
   readonly sim: Sim;
   private readonly root = new THREE.Group();
+  private readonly levelView: LevelView;
   private readonly unitViews: UnitViews;
   private readonly fog: FogOfWar;
   private readonly effects = new Effects();
@@ -53,18 +54,19 @@ class Mission {
   private readonly contacted = new Set<number>();
 
   constructor(seed: number, onRestart: () => void) {
-    this.sim = new Sim(COLD_HARBOUR, seed);
+    this.sim = new Sim(STEPOVE, seed);
 
     this.fog = new FogOfWar(this.sim);
     this.root.add(buildLighting(this.sim.world));
-    this.root.add(buildLevel(this.sim.world, this.fog));
+    this.levelView = new LevelView(this.sim.world, this.fog);
+    this.root.add(this.levelView.group);
 
     this.unitViews = new UnitViews(this.sim);
     this.markers = new Markers(this.sim);
     this.root.add(this.unitViews.group, this.effects.group, this.markers.group);
     scene.add(this.root);
 
-    this.hud = new Hud(uiRoot, COLD_HARBOUR, this.sim, (id) => this.select([id], false), onRestart);
+    this.hud = new Hud(uiRoot, STEPOVE, this.sim, (id) => this.select([id], false), onRestart);
 
     this.controls = new Controls(canvas, iso, selectionBox, {
       squadAt: (ground) => {
@@ -93,7 +95,7 @@ class Mission {
 
     // Open looking at the start line, not at the middle of the map.
     const spawn = this.sim.world.spawns.teams[1][0] ?? { x: 31, y: 32 };
-    iso.jumpTo(spawn.x, spawn.y - 6);
+    iso.jumpTo(spawn.x, spawn.y - 18);
 
     for (const unit of this.sim.unitList) this.lastState.set(unit.id, unit.state);
     this.hud.alert('Three fireteams on the start line. Do not walk in the front gate.');
@@ -228,6 +230,7 @@ class Mission {
     iso.clampFocus(this.sim.world.width, this.sim.world.height);
     iso.update(dt);
 
+    this.levelView.update(this.sim.world);
     this.unitViews.update(this.sim, dt, this.selected, iso.camera.quaternion);
     this.fog.update(this.sim, dt);
     this.effects.update(dt);

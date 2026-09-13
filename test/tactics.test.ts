@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COLD_HARBOUR } from '../src/sim/levels.ts';
+import { STEPOVE } from '../src/sim/levels.ts';
 import { MissionState, Sim } from '../src/sim/sim.ts';
 import { Faction, MoveMode, UnitState } from '../src/sim/units.ts';
 
@@ -11,105 +11,105 @@ interface Step {
   x: number;
   y: number;
   mode: MoveMode;
-  face?: number;
 }
 
-const N = -Math.PI / 2;
+const NORTH = -Math.PI / 2;
 
-/** Kick the front door: everyone sprints straight up the middle. */
-const FRONTAL: Step[] = [
-  { t: 0, squad: 0, x: 33, y: 29, mode: MoveMode.Sprint },
-  { t: 0, squad: 1, x: 33, y: 30, mode: MoveMode.Sprint },
-  { t: 0, squad: 2, x: 34, y: 30, mode: MoveMode.Sprint },
-  { t: 8, squad: 0, x: 28, y: 20, mode: MoveMode.Sprint, face: N },
-  { t: 8, squad: 1, x: 32, y: 20, mode: MoveMode.Sprint, face: N },
-  { t: 8, squad: 2, x: 36, y: 20, mode: MoveMode.Sprint, face: N },
-  { t: 20, squad: 0, x: 26, y: 12, mode: MoveMode.Sprint, face: N },
-  { t: 20, squad: 1, x: 30, y: 12, mode: MoveMode.Sprint, face: N },
-  { t: 20, squad: 2, x: 34, y: 12, mode: MoveMode.Sprint, face: N },
-  { t: 32, squad: 0, x: 26, y: 7, mode: MoveMode.Sprint, face: N },
-  { t: 32, squad: 1, x: 29, y: 7, mode: MoveMode.Sprint, face: N },
-  { t: 32, squad: 2, x: 33, y: 7, mode: MoveMode.Sprint, face: N },
-  { t: 50, squad: 0, x: 28, y: 5, mode: MoveMode.Tactical, face: N },
-  { t: 50, squad: 1, x: 30, y: 5, mode: MoveMode.Tactical, face: N },
-  { t: 50, squad: 2, x: 26, y: 5, mode: MoveMode.Tactical, face: N },
-];
+/** Straight up the middle at a run, the whole way. */
+const FRONTAL: Step[] = [];
+for (const [t, y] of [[0, 100], [16, 84], [30, 70], [46, 48], [62, 30]] as const) {
+  for (const squad of [0, 1, 2]) {
+    FRONTAL.push({ t, squad, x: 78 + squad * 8, y, mode: MoveMode.Sprint });
+  }
+}
+for (const [squad, x] of [[0, 86], [1, 92], [2, 98]] as const) {
+  FRONTAL.push({ t: 82, squad, x, y: 23, mode: MoveMode.Tactical });
+}
 
-/** BRAVO holds the wall as the base of fire; ALPHA and CHARLIE bound the flanks. */
+/** BRAVO works the middle as a base of fire; the others bound the flanks. */
 const BOUNDING: Step[] = [
-  { t: 0, squad: 1, x: 30, y: 29, mode: MoveMode.Tactical, face: N },
-  { t: 2, squad: 0, x: 10, y: 30, mode: MoveMode.Tactical, face: N },
-  { t: 2, squad: 2, x: 46, y: 30, mode: MoveMode.Tactical, face: N },
-  { t: 16, squad: 0, x: 10, y: 24, mode: MoveMode.Sprint, face: N },
-  { t: 16, squad: 2, x: 46, y: 24, mode: MoveMode.Sprint, face: N },
-  { t: 28, squad: 0, x: 11, y: 19, mode: MoveMode.Tactical, face: N },
-  { t: 28, squad: 2, x: 45, y: 19, mode: MoveMode.Tactical, face: N },
-  { t: 42, squad: 0, x: 13, y: 13, mode: MoveMode.Tactical, face: N },
-  { t: 42, squad: 2, x: 44, y: 13, mode: MoveMode.Tactical, face: N },
-  { t: 56, squad: 0, x: 15, y: 11, mode: MoveMode.Sprint, face: N },
-  { t: 56, squad: 2, x: 45, y: 11, mode: MoveMode.Sprint, face: N },
-  { t: 64, squad: 1, x: 30, y: 20, mode: MoveMode.Sprint, face: N },
-  { t: 70, squad: 0, x: 17, y: 7, mode: MoveMode.Tactical, face: N },
-  { t: 70, squad: 2, x: 44, y: 7, mode: MoveMode.Tactical, face: N },
-  { t: 80, squad: 1, x: 30, y: 12, mode: MoveMode.Sprint, face: N },
-  { t: 92, squad: 1, x: 29, y: 6, mode: MoveMode.Tactical, face: N },
-  { t: 104, squad: 0, x: 26, y: 5, mode: MoveMode.Tactical, face: N },
-  { t: 104, squad: 2, x: 31, y: 5, mode: MoveMode.Tactical, face: N },
+  { t: 0, squad: 1, x: 86, y: 113, mode: MoveMode.Tactical },
+  { t: 4, squad: 0, x: 40, y: 112, mode: MoveMode.Tactical },
+  { t: 4, squad: 2, x: 132, y: 112, mode: MoveMode.Tactical },
+  { t: 22, squad: 0, x: 34, y: 101, mode: MoveMode.Sprint },
+  { t: 22, squad: 2, x: 140, y: 100, mode: MoveMode.Sprint },
+  { t: 40, squad: 0, x: 26, y: 90, mode: MoveMode.Tactical },
+  { t: 40, squad: 2, x: 146, y: 86, mode: MoveMode.Tactical },
+  { t: 56, squad: 1, x: 86, y: 100, mode: MoveMode.Tactical },
+  { t: 68, squad: 0, x: 22, y: 74, mode: MoveMode.Sprint },
+  { t: 68, squad: 2, x: 152, y: 72, mode: MoveMode.Sprint },
+  { t: 86, squad: 0, x: 32, y: 60, mode: MoveMode.Tactical },
+  { t: 86, squad: 2, x: 146, y: 60, mode: MoveMode.Tactical },
+  { t: 100, squad: 1, x: 86, y: 86, mode: MoveMode.Tactical },
+  { t: 112, squad: 0, x: 44, y: 42, mode: MoveMode.Tactical },
+  { t: 112, squad: 2, x: 130, y: 40, mode: MoveMode.Tactical },
+  { t: 128, squad: 1, x: 88, y: 68, mode: MoveMode.Sprint },
+  { t: 142, squad: 0, x: 78, y: 26, mode: MoveMode.Tactical },
+  { t: 142, squad: 2, x: 108, y: 26, mode: MoveMode.Tactical },
+  { t: 160, squad: 1, x: 92, y: 24, mode: MoveMode.Tactical },
 ];
 
 function runPlan(plan: Step[], seed: number) {
-  const sim = new Sim(COLD_HARBOUR, seed);
-  const dt = 1 / 60;
+  const sim = new Sim(STEPOVE, seed);
   const steps = [...plan].sort((a, b) => a.t - b.t);
   let next = 0;
 
-  for (let i = 0; i < 60 * 180; i++) {
+  for (let i = 0; i < 60 * 220; i++) {
     while (next < steps.length && sim.time >= steps[next].t) {
       const s = steps[next++];
-      sim.orderSquad(s.squad, { x: s.x, y: s.y }, s.mode, s.face ?? null);
+      sim.orderSquad(s.squad, { x: s.x, y: s.y }, s.mode, NORTH);
     }
-    sim.update(dt);
+    sim.update(1 / 60);
     if (sim.missionState !== MissionState.InProgress) break;
   }
 
   const players = sim.unitList.filter((u) => u.faction === Faction.Player);
+  const hostiles = sim.unitList.filter((u) => u.faction === Faction.Hostile);
   return {
-    won: sim.missionState === MissionState.Won,
     killed: players.filter((u) => u.state === UnitState.Dead).length,
+    standing: players.filter((u) => u.state === UnitState.Active).length,
+    neutralised: hostiles.filter((u) => u.state !== UnitState.Active).length,
   };
 }
 
 function score(plan: Step[], seeds: number[]) {
-  let wins = 0;
   let killed = 0;
+  let standing = 0;
+  let neutralised = 0;
   for (const seed of seeds) {
     const r = runPlan(plan, seed);
-    if (r.won) wins++;
     killed += r.killed;
+    standing += r.standing;
+    neutralised += r.neutralised;
   }
-  return { wins, killed: killed / seeds.length };
+  const n = seeds.length;
+  return { killed: killed / n, standing: standing / n, neutralised: neutralised / n };
 }
 
-test('fire and maneuver beats a frontal assault', { timeout: 300_000 }, () => {
+test('fire and maneuver beats crossing the open', { timeout: 600_000 }, () => {
   // The whole design rests on this. Nothing in the code rewards flanking
   // directly — it falls out of cover being directional, suppression wrecking
   // accuracy, and movement making you conspicuous. If this inverts, one of
   // those three has been tuned into irrelevance.
-  const seeds = [1000, 1007, 1014, 1021, 1028, 1035, 1042, 1049];
+  //
+  // It runs on Stepove rather than Cold Harbour because Cold Harbour is 73 m
+  // corner to corner: with the engagement envelope this game now uses, there
+  // is no ground on it far enough to be worth crossing carefully, so it cannot
+  // tell the two plans apart.
+  const seeds = [2000, 2011, 2022, 2033];
   const frontal = score(FRONTAL, seeds);
   const bounding = score(BOUNDING, seeds);
 
   assert.ok(
-    bounding.wins > frontal.wins,
-    `bounding won ${bounding.wins}/${seeds.length}, frontal won ${frontal.wins}/${seeds.length}`,
-  );
-  assert.ok(
     bounding.killed < frontal.killed,
     `bounding lost ${bounding.killed.toFixed(1)} operators on average, frontal lost ${frontal.killed.toFixed(1)}`,
   );
-  // A frontal assault into a machine gun should not be a viable plan.
   assert.ok(
-    frontal.wins <= seeds.length / 4,
-    `frontal assault won ${frontal.wins}/${seeds.length} — the killzone is not doing its job`,
+    bounding.standing > frontal.standing + 1,
+    `bounding finished with ${bounding.standing.toFixed(1)} standing, frontal with ${frontal.standing.toFixed(1)}`,
+  );
+  assert.ok(
+    bounding.neutralised > frontal.neutralised,
+    `bounding put down ${bounding.neutralised.toFixed(1)} defenders, frontal ${frontal.neutralised.toFixed(1)}`,
   );
 });

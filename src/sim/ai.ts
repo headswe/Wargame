@@ -25,10 +25,10 @@ export interface SimContext {
   time: number;
 }
 
-const VISION_RANGE = 27;
+const VISION_RANGE = 85;
 const VISION_HALF_ANGLE = Math.cos((58 * Math.PI) / 180);
 /** You notice someone at arm's length regardless of where you are looking. */
-const AWARENESS_RADIUS = 5.5;
+const AWARENESS_RADIUS = 7;
 /** Spotting progress needed before an operator will engage a contact. */
 const SPOT_ACQUIRE = 1;
 /** Progress saturates above the threshold, buying a grace period on lost sight. */
@@ -423,7 +423,7 @@ function updateHostileInitiative(ctx: SimContext, u: Unit): void {
   const target = u.targetId ? ctx.units.get(u.targetId) : null;
   if (!target) return;
 
-  const protection = coverAgainst(u, target.pos);
+  const protection = coverAgainst(ctx.world, u, target.pos);
   if (protection > 0.25) return;
 
   // We are in the open relative to this threat. Find something better nearby.

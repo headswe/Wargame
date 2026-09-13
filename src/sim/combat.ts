@@ -41,9 +41,9 @@ export type Effect = ShotEffect | HitEffect | ImpactEffect;
  * fire gives up a chunk of it. That trade — shoot or stay safe — is the whole
  * reason suppression works as a mechanic.
  */
-export function coverAgainst(unit: Unit, fromPos: Vec2): number {
+export function coverAgainst(world: World, unit: Unit, fromPos: Vec2): number {
   const node = unit.claimedNode;
-  if (!node) return 0;
+  if (!node || node.arcs.length === 0) return 0;
   // You only get cover if you are actually in it, not merely heading there.
   if (dist(unit.pos, node.pos) > 0.5) return 0;
 
@@ -54,9 +54,34 @@ export function coverAgainst(unit: Unit, fromPos: Vec2): number {
     if (alignment <= 0.25) continue;
     // Full value head-on, tapering to nothing as the threat works around.
     const falloff = invLerpClamped(alignment, 0.25, 0.72);
-    best = Math.max(best, arc.value * falloff);
+    // A wall that has been shot to bits still stops something, but not much.
+    // This is what makes a long exchange against one piece of cover slowly
+    // turn a safe position into an untenable one.
+    const integrity = world.integrityAt(node.tx + arc.dir.x, node.ty + arc.dir.y);
+    best = Math.max(best, arc.value * falloff * (0.4 + 0.6 * integrity));
   }
   return best * (1 - unit.exposure * 0.45);
+}
+
+/**
+ * Which tile is doing the protecting against fire from `fromPos`. Misses need
+ * this: rounds that go wide still slam into the cover, and that is how cover
+ * wears out.
+ */
+function shieldingTile(unit: Unit, fromPos: Vec2): { tx: number; ty: number } | null {
+  const node = unit.claimedNode;
+  if (!node || node.arcs.length === 0) return null;
+  const toThreat = normalize(sub(fromPos, unit.pos));
+  let best: { tx: number; ty: number } | null = null;
+  let bestAlignment = 0.25;
+  for (const arc of node.arcs) {
+    const alignment = dot(arc.dir, toThreat);
+    if (alignment > bestAlignment) {
+      bestAlignment = alignment;
+      best = { tx: node.tx + arc.dir.x, ty: node.ty + arc.dir.y };
+    }
+  }
+  return best;
 }
 
 function rangeFactor(d: number, optimal: number, max: number): number {
@@ -97,7 +122,7 @@ export function hitChance(
     return { chance: 0, cover: 0, range: d, blocked: true };
   }
 
-  const cover = coverAgainst(target, shooter.pos);
+  const cover = coverAgainst(world, target, shooter.pos);
   const obstruction = Math.min(0.5, t.lowCrossed * 0.13);
 
   let p = shooter.weapon.accuracy;
@@ -189,6 +214,12 @@ export function resolveShot(
     const t = trace(world, shooter.pos, aim);
     impact = t.hit ?? aim;
     effects.push({ kind: 'impact', at: impact });
+
+    // Rounds that go wide put their energy into the scenery. Either they strike
+    // something full-height on the way, or they hammer the cover the target is
+    // tucked behind — both wear it down.
+    const struck = t.hitTile ?? shieldingTile(target, shooter.pos);
+    if (struck) world.damageTile(struck.tx, struck.ty, shooter.weapon.damage);
   }
 
   effects.push({

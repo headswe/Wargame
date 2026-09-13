@@ -57,8 +57,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 30,
     reloadTime: 2.6,
     accuracy: 0.74,
-    optimalRange: 11,
-    maxRange: 28,
+    optimalRange: 32,
+    maxRange: 78,
     suppressionPower: 0.9,
   },
   saw: {
@@ -70,8 +70,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 100,
     reloadTime: 6.0,
     accuracy: 0.4,
-    optimalRange: 13,
-    maxRange: 32,
+    optimalRange: 42,
+    maxRange: 98,
     suppressionPower: 2.7,
   },
   dmr: {
@@ -83,8 +83,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 20,
     reloadTime: 3.2,
     accuracy: 0.88,
-    optimalRange: 20,
-    maxRange: 42,
+    optimalRange: 62,
+    maxRange: 140,
     suppressionPower: 1.2,
   },
   smg: {
@@ -96,8 +96,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 32,
     reloadTime: 2.2,
     accuracy: 0.62,
-    optimalRange: 5,
-    maxRange: 15,
+    optimalRange: 14,
+    maxRange: 38,
     suppressionPower: 0.8,
   },
   ak: {
@@ -109,8 +109,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 30,
     reloadTime: 3.4,
     accuracy: 0.55,
-    optimalRange: 9,
-    maxRange: 26,
+    optimalRange: 26,
+    maxRange: 66,
     suppressionPower: 1.0,
   },
   pkm: {
@@ -122,8 +122,8 @@ export const WEAPONS: Record<string, Weapon> = {
     magSize: 100,
     reloadTime: 7.0,
     accuracy: 0.32,
-    optimalRange: 14,
-    maxRange: 34,
+    optimalRange: 46,
+    maxRange: 105,
     suppressionPower: 2.9,
   },
 };
@@ -257,7 +257,10 @@ export const isMoving = (u: Unit): boolean =>
 
 /** Movement speed in tiles/second, after stamina and suppression. */
 export function speedOf(u: Unit): number {
-  const base = u.moveMode === MoveMode.Sprint ? 4.3 : 1.75;
+  // Loaded infantry, not sprinters. The gap between these two numbers is the
+  // whole tempo decision, and the sprint has to stay slow enough that crossing
+  // open ground is genuinely exposed rather than a teleport.
+  const base = u.moveMode === MoveMode.Sprint ? 5.0 : 2.2;
   const staminaFactor = u.moveMode === MoveMode.Sprint ? 0.55 + u.stamina * 0.45 : 1;
   const supFactor = 1 - u.suppression * 0.45;
   return base * staminaFactor * supFactor;

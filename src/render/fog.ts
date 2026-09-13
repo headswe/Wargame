@@ -57,7 +57,11 @@ export class FogOfWar {
     const texture = this.texture;
     const worldSize = this.worldSize;
 
-    material.onBeforeCompile = (shader) => {
+    const previous = material.onBeforeCompile;
+    material.onBeforeCompile = (shader, renderer) => {
+      // Compose rather than replace: the ground already injects its own
+      // material lookup, and clobbering it silently loses the terrain colours.
+      previous?.call(material, shader, renderer);
       shader.uniforms.fogMap = { value: texture };
       shader.uniforms.fogWorldSize = { value: worldSize };
 
