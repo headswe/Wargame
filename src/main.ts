@@ -8,11 +8,11 @@ import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
 import type { Vec2 } from './sim/math.ts';
 
 import { IsoCamera } from './render/camera.ts';
-import { LevelView, buildLighting } from './render/level.ts';
+import { WorldView, buildLighting } from './render/world.ts';
 import { UnitViews } from './render/units.ts';
 import { FogOfWar } from './render/fog.ts';
 import { Effects } from './render/effects.ts';
-import { Markers, inferThreat } from './render/markers.ts';
+import { Markers } from './render/markers.ts';
 
 import { Controls } from './input/controls.ts';
 import { Hud } from './ui/hud.ts';
@@ -38,7 +38,7 @@ const iso = new IsoCamera();
 class Mission {
   readonly sim: Sim;
   private readonly root = new THREE.Group();
-  private readonly levelView: LevelView;
+  private readonly worldView: WorldView;
   private readonly unitViews: UnitViews;
   private readonly fog: FogOfWar;
   private readonly effects = new Effects();
@@ -57,9 +57,9 @@ class Mission {
     this.sim = new Sim(STEPOVE, seed);
 
     this.fog = new FogOfWar(this.sim);
-    this.root.add(buildLighting(this.sim.world));
-    this.levelView = new LevelView(this.sim.world, this.fog);
-    this.root.add(this.levelView.group);
+    this.root.add(buildLighting(this.sim.scene));
+    this.worldView = new WorldView(this.sim.scene, this.fog);
+    this.root.add(this.worldView.group);
 
     this.unitViews = new UnitViews(this.sim);
     this.markers = new Markers(this.sim);
@@ -79,7 +79,8 @@ class Mission {
       onHover: (ground) => {
         this.hover = ground;
       },
-      onFacingDrag: (from, angle) => this.markers.showFacingArrow(from, angle),
+      onFacingDrag: (from, angle) =>
+        this.markers.showFacingArrow(from, angle, this.sim.scene.heightAt(from.x, from.y)),
       onFacingDragEnd: () => this.markers.hideFacingArrow(),
       onSelectSquadIndex: (index) => {
         const squad = this.sim.playerSquads[index];
@@ -94,7 +95,7 @@ class Mission {
     });
 
     // Open looking at the start line, not at the middle of the map.
-    const spawn = this.sim.world.spawns.teams[1][0] ?? { x: 31, y: 32 };
+    const spawn = this.sim.scene.spawns.teams[1][0] ?? { x: 85, y: 122 };
     iso.jumpTo(spawn.x, spawn.y - 18);
 
     for (const unit of this.sim.unitList) this.lastState.set(unit.id, unit.state);
@@ -213,9 +214,7 @@ class Mission {
         // Effects are cleared at the top of every sim step, so they have to be
         // collected per step, not once per frame. Rounds fired inside the fog
         // stay in the fog — tracers would otherwise map the whole compound.
-        this.effects.ingest(this.sim.effects, (x, y) =>
-          this.sim.isVisible(Math.floor(x), Math.floor(y)),
-        );
+        this.effects.ingest(this.sim.effects, (x, y) => this.sim.isVisible(x, y));
         this.accumulator -= TICK;
         ticks++;
       }
@@ -224,13 +223,12 @@ class Mission {
 
     this.raiseAlerts();
 
-    const threat = this.hover ? inferThreat(this.sim, this.selected, this.hover) : null;
-    this.markers.setHover(this.selected.size > 0 ? this.hover : null, threat);
+    this.markers.setHover(this.hover);
 
-    iso.clampFocus(this.sim.world.width, this.sim.world.height);
+    iso.clampFocus(this.sim.scene.width, this.sim.scene.height);
     iso.update(dt);
 
-    this.levelView.update(this.sim.world);
+    this.worldView.update();
     this.unitViews.update(this.sim, dt, this.selected, iso.camera.quaternion);
     this.fog.update(this.sim, dt);
     this.effects.update(dt);
@@ -314,7 +312,7 @@ window.wargame = {
         mode: u.moveMode,
         pathLength: u.path.length,
         hasSlot: u.slot !== null,
-        inCover: u.claimedNode !== null,
+        inCover: u.coverSpot !== null,
         suppression: Number(u.suppression.toFixed(2)),
         visible: u.visible.length,
       })),

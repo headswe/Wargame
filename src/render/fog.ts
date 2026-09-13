@@ -24,8 +24,8 @@ export class FogOfWar {
   private readonly height: number;
 
   constructor(sim: Sim) {
-    this.width = sim.world.width;
-    this.height = sim.world.height;
+    this.width = sim.fogCols;
+    this.height = sim.fogRows;
 
     this.data = new Uint8Array(this.width * this.height);
     this.fade = new Float32Array(this.width * this.height).fill(UNSEEN);
@@ -40,7 +40,7 @@ export class FogOfWar {
     this.texture.wrapT = THREE.ClampToEdgeWrapping;
     this.texture.needsUpdate = true;
 
-    this.worldSize = new THREE.Vector2(this.width, this.height);
+    this.worldSize = new THREE.Vector2(sim.scene.width, sim.scene.height);
   }
 
   private readonly worldSize: THREE.Vector2;
@@ -93,10 +93,10 @@ export class FogOfWar {
     material.needsUpdate = true;
   }
 
-  /** Darkness at a world position, for deciding what else to draw. */
-  shadeAt(x: number, y: number): number {
-    const tx = Math.floor(x);
-    const ty = Math.floor(y);
+  /** Darkness at a fog-grid position, for deciding what else to draw. */
+  shadeAt(i: number, j: number): number {
+    const tx = Math.floor(i);
+    const ty = Math.floor(j);
     if (tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return 1;
     return this.fade[ty * this.width + tx];
   }

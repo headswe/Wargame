@@ -3,20 +3,18 @@ import {
   normalize, sub, turnToward, vec,
 } from './math.ts';
 import type { Rng } from './rng.ts';
-import type { World } from './world.ts';
-import { hasLineOfSight } from './los.ts';
-import { findPath } from './pathfind.ts';
+import type { Scene } from './world/scene.ts';
+import { Stature } from './world/occlusion.ts';
 import {
-  Faction, MoveMode, Posture, UnitState, type Unit, isMoving, speedOf,
+  Faction, MoveMode, Posture, UnitState, type Unit, eyeOf, isMoving, silhouetteOf, speedOf,
 } from './units.ts';
 import {
-  type Effect, PIN_THRESHOLD, SUPPRESSION_DECAY, UNPIN_THRESHOLD, coverAgainst,
-  hitChance, resolveShot,
+  type Effect, PIN_THRESHOLD, SUPPRESSION_DECAY, UNPIN_THRESHOLD, hitChance, resolveShot,
 } from './combat.ts';
 import type { Squad } from './squads.ts';
 
 export interface SimContext {
-  world: World;
+  scene: Scene;
   rng: Rng;
   units: Map<number, Unit>;
   unitList: Unit[];
@@ -58,18 +56,41 @@ function signature(u: Unit): number {
   return s;
 }
 
-function inView(ctx: SimContext, observer: Unit, target: Unit, d: number): boolean {
-  if (d > VISION_RANGE) return false;
-  if (d > AWARENESS_RADIUS) {
-    const toTarget = normalize(sub(target.pos, observer.pos));
-    if (dot(toTarget, fromAngle(observer.facing)) < VISION_HALF_ANGLE) return false;
-  }
-  return hasLineOfSight(ctx.world, observer.pos, target.pos);
+interface Look {
+  seen: boolean;
+  exposure: number;
+  concealment: number;
+  distance: number;
 }
 
-function spotRate(target: Unit, d: number): number {
-  const rangeFactor = 1 - 0.7 * clamp(d / VISION_RANGE, 0, 1);
-  let rate = SPOT_BASE_RATE * signature(target) * rangeFactor;
+function look(ctx: SimContext, observer: Unit, target: Unit): Look {
+  const d = dist(observer.pos, target.pos);
+  if (d > VISION_RANGE) return { seen: false, exposure: 0, concealment: 0, distance: d };
+  if (d > AWARENESS_RADIUS) {
+    const toTarget = normalize(sub(target.pos, observer.pos));
+    if (dot(toTarget, fromAngle(observer.facing)) < VISION_HALF_ANGLE) {
+      return { seen: false, exposure: 0, concealment: 0, distance: d };
+    }
+  }
+  const sighting = ctx.scene.sight(
+    { x: observer.pos.x, y: observer.pos.y, eye: eyeOf(observer) },
+    { x: target.pos.x, y: target.pos.y, base: 0, top: silhouetteOf(target) },
+    VISION_RANGE,
+  );
+  return {
+    seen: sighting.visible,
+    exposure: sighting.exposure,
+    concealment: sighting.concealment,
+    distance: sighting.distance,
+  };
+}
+
+function spotRate(target: Unit, view: Look): number {
+  const rangeFactor = 1 - 0.7 * clamp(view.distance / VISION_RANGE, 0, 1);
+  // Showing less of yourself is exactly as good as being further away, which
+  // is why a man in a ditch is so hard to find.
+  let rate = SPOT_BASE_RATE * signature(target) * rangeFactor * view.exposure;
+  rate *= 1 - view.concealment * 0.85;
   // Opening fire announces you, wherever you are hiding.
   if (target.lastShotAt < 0.6) rate *= 3;
   return rate;
@@ -87,11 +108,10 @@ function updateSenses(ctx: SimContext, u: Unit, dt: number): void {
       continue;
     }
 
-    const d = dist(u.pos, other.pos);
-    const seen = inView(ctx, u, other, d);
+    const view = look(ctx, u, other);
     let progress = u.spotting.get(other.id) ?? 0;
-    progress = seen
-      ? clamp(progress + spotRate(other, d) * dt, 0, SPOT_MAX)
+    progress = view.seen
+      ? clamp(progress + spotRate(other, view) * dt, 0, SPOT_MAX)
       : clamp(progress - SPOT_DECAY * dt, 0, SPOT_MAX);
 
     if (progress <= 0) u.spotting.delete(other.id);
@@ -142,7 +162,7 @@ function selectTarget(ctx: SimContext, u: Unit): Unit | null {
   for (const id of u.visible) {
     const t = ctx.units.get(id);
     if (!t || t.state !== UnitState.Active) continue;
-    const bd = hitChance(ctx.world, u, t);
+    const bd = hitChance(ctx.scene, u, t);
     if (bd.blocked) continue;
     const d = bd.range;
     let score = bd.chance * 3 - d * 0.05;
@@ -164,9 +184,8 @@ function updatePosture(u: Unit): void {
     return;
   }
   if (u.posture === Posture.Pinned && u.suppression > UNPIN_THRESHOLD) return;
-  const inCover =
-    u.claimedNode !== null && dist(u.pos, u.claimedNode.pos) < 0.5 && !isMoving(u);
-  u.posture = inCover ? Posture.Crouched : Posture.Standing;
+  const settled = u.coverSpot !== null && dist(u.pos, u.coverSpot) < 0.8 && !isMoving(u);
+  u.posture = settled ? Posture.Crouched : Posture.Standing;
 }
 
 /**
@@ -221,7 +240,9 @@ function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
   }
 
   const dir = normalize(sub(waypoint, u.pos));
-  const speed = speedOf(u);
+  // Climbing costs you. Gentle ground is free; a steep bank halves your pace.
+  const slope = ctx.scene.terrain.slopeAt(u.pos.x, u.pos.y);
+  const speed = speedOf(u) * (1 - clamp(slope * 0.45, 0, 0.5));
   const sep = separation(ctx, u);
   const vx = dir.x * speed + sep.x;
   const vy = dir.y * speed + sep.y;
@@ -230,9 +251,10 @@ function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
   // instead of stopping the operator dead.
   const nx = u.pos.x + vx * dt;
   const ny = u.pos.y + vy * dt;
-  if (ctx.world.walkable(Math.floor(nx), Math.floor(u.pos.y))) u.pos.x = nx;
-  if (ctx.world.walkable(Math.floor(u.pos.x), Math.floor(ny))) u.pos.y = ny;
+  if (ctx.scene.walkable(nx, u.pos.y)) u.pos.x = nx;
+  if (ctx.scene.walkable(u.pos.x, ny)) u.pos.y = ny;
   u.velocity = vec(vx, vy);
+  u.groundHeight = ctx.scene.heightAt(u.pos.x, u.pos.y);
 }
 
 function updateWeaponHandling(u: Unit, dt: number): void {
@@ -284,7 +306,7 @@ function tryFire(ctx: SimContext, u: Unit, target: Unit, dt: number): void {
 
   if (u.fireCooldown > 0) return;
 
-  resolveShot(ctx.world, ctx.rng, ctx.unitList, u, target, ctx.effects);
+  resolveShot(ctx.scene, ctx.rng, ctx.unitList, u, target, ctx.effects);
   u.ammoInMag--;
   u.lastShotAt = 0;
   u.fireCooldown = 60 / u.weapon.rpm;
@@ -337,7 +359,10 @@ function ensurePath(ctx: SimContext, u: Unit, dt: number): void {
   if (u.repathTimer > 0) u.repathTimer -= dt;
   if (!u.slot) return;
 
-  if (dist(u.pos, u.slot) < 0.25) {
+  if (dist(u.pos, u.slot) < 0.6) {
+    // Arrived. This is the position being held now, which is what makes the
+    // operator settle and crouch into it.
+    u.coverSpot = { ...u.slot };
     u.slot = null;
     u.path.length = 0;
     u.pathIndex = 0;
@@ -348,7 +373,7 @@ function ensurePath(ctx: SimContext, u: Unit, dt: number): void {
   if (heading && dist(heading, u.slot) < 0.3) return;
   if (u.repathTimer > 0) return;
 
-  const path = findPath(ctx.world, u.pos, u.slot);
+  const path = ctx.scene.findPath(u.pos, u.slot);
   if (path) {
     u.path = path;
     u.pathIndex = 0;
@@ -360,12 +385,9 @@ function ensurePath(ctx: SimContext, u: Unit, dt: number): void {
   // try again rather than silently dropping the order on the floor.
   const order = ctx.squads[u.squadId]?.order;
   if (order) {
-    const fallback = findPath(ctx.world, u.pos, order.dest);
+    const fallback = ctx.scene.findPath(u.pos, order.dest);
     if (fallback) {
-      if (u.claimedNode) {
-        u.claimedNode.claimedBy = null;
-        u.claimedNode = null;
-      }
+      u.coverSpot = null;
       u.slot = { ...order.dest };
       u.path = fallback;
       u.pathIndex = 0;
@@ -412,8 +434,9 @@ function updateDowned(u: Unit, dt: number): void {
 }
 
 /**
- * Hostiles hold what they were given, but they are not furniture: take their
- * cover away by flanking it and they will move to something that still works.
+ * Hostiles hold what they were given, but they are not furniture. If most of a
+ * man is showing to whoever is shooting at him, he is not in a position — he
+ * is merely standing somewhere — and he will go and find one.
  */
 function updateHostileInitiative(ctx: SimContext, u: Unit): void {
   if (u.faction !== Faction.Hostile) return;
@@ -423,31 +446,20 @@ function updateHostileInitiative(ctx: SimContext, u: Unit): void {
   const target = u.targetId ? ctx.units.get(u.targetId) : null;
   if (!target) return;
 
-  const protection = coverAgainst(ctx.world, u, target.pos);
-  if (protection > 0.25) return;
+  const showing = ctx.scene.sight(
+    { x: target.pos.x, y: target.pos.y, eye: eyeOf(target) },
+    { x: u.pos.x, y: u.pos.y, base: 0, top: silhouetteOf(u) },
+  ).exposure;
+  if (showing < 0.55) return;
 
-  // We are in the open relative to this threat. Find something better nearby.
-  const threatDir = normalize(sub(target.pos, u.pos));
-  const options = ctx.world.coverNear(u.pos, 6).filter((n) => n.claimedBy === null);
-  let best = null;
-  let bestScore = 0.3;
-  for (const node of options) {
-    let value = 0;
-    for (const arc of node.arcs) {
-      if (dot(arc.dir, threatDir) > 0.4) value = Math.max(value, arc.value);
-    }
-    if (value <= 0) continue;
-    const score = value - dist(node.pos, u.pos) * 0.06;
-    if (score > bestScore) {
-      bestScore = score;
-      best = node;
-    }
-  }
-  if (best) {
-    if (u.claimedNode) u.claimedNode.claimedBy = null;
-    best.claimedBy = u.id;
-    u.claimedNode = best;
-    u.slot = { ...best.pos };
+  const better = ctx.scene.findCover(u.pos, 7, target.pos, {
+    crouchTop: Stature.crouchedTop,
+    eye: Stature.crouchedEye,
+    samples: 24,
+  });
+  const pick = better.find((c) => c.exposure < showing - 0.25 && c.canFire);
+  if (pick) {
+    u.slot = { ...pick.pos };
     u.moveMode = MoveMode.Tactical;
   }
 }

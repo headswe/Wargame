@@ -1,109 +1,36 @@
 import { vec } from './math.ts';
-import { LevelCanvas } from './levelgen.ts';
-import { Material, Tile, World, parseLevel } from './world.ts';
-
-/**
- * Levels are ASCII. Legend:
- *   #  wall (blocks movement, sight and bullets)
- *   o  low cover (blocks movement, shoot over it, good protection)
- *   "  firing port / window — a wall you can shoot through but not walk through
- *   +  doorway (walkable gap — a funnel, so a natural killzone)
- *   .  open ground
- *   1/2/3  spawn for fireteams ALPHA / BRAVO / CHARLIE
- *   e  hostile   E  hostile with the belt-fed
- *   X  objective
- */
+import { Fabric } from './world/geometry.ts';
+import { Scene } from './world/scene.ts';
+import { Surface } from './world/terrain.ts';
+import { building, hedgerow, obstacle, revetment } from './world/builder.ts';
 
 export interface LevelDef {
   id: string;
   name: string;
   brief: string;
-  /** ASCII floorplan — unbeatable for tight interiors you want to read in a diff. */
-  rows?: string[];
-  /** Painted from primitives — for anything big enough that ASCII stops scaling. */
-  size?: { width: number; height: number };
-  paint?: (c: LevelCanvas) => void;
+  size: { width: number; height: number };
+  paint: (scene: Scene) => void;
 }
 
-/** Build a level's world, whichever way it was authored. */
-export function createWorld(level: LevelDef): World {
-  if (level.rows) return parseLevel(level.rows);
-  if (level.paint && level.size) {
-    const canvas = new LevelCanvas(level.size.width, level.size.height, 20260913);
-    level.paint(canvas);
-    return canvas.toWorld();
-  }
-  throw new Error(`level ${level.id} has neither rows nor a paint function`);
+export function createScene(level: LevelDef): Scene {
+  const scene = new Scene(level.size.width, level.size.height);
+  level.paint(scene);
+  scene.bake();
+  return scene;
 }
-
-/**
- * "Cold Harbour" — a walled compound.
- *
- * The shape is the lesson. A wide courtyard is covered by a machine gun behind
- * sandbags, with the office block's firing ports looking down on all of it.
- * Walk in the main gate and you lose people. The containers down both flanks
- * and the two breaches in the perimeter are the answer: pin the gun with a SAW
- * from one side, bound a team up the other.
- */
-export const COLD_HARBOUR: LevelDef = {
-  id: 'cold-harbour',
-  name: 'Cold Harbour',
-  brief:
-    'Client wants the compound office cleared and held. Ten or so guards, ' +
-    'at least one belt-fed covering the courtyard. Do not walk in the front gate.',
-  rows: [
-    '##############################################################',
-    '#............................................................#',
-    '#.........##########################################.........#',
-    '#.........#...........#.............#..............#.........#',
-    '#........."..e........#....oo.......#.......e......#.........#',
-    '#.........#...........#.....X.......#..............#.........#',
-    '#.........+...oo......#.............#.....oo.......+.........#',
-    '#.........#...........+.............+..............#.........#',
-    '#.........#...........#.............#..............".........#',
-    '#.........#........e..#....e........#.e.........e..#.........#',
-    '#.........##"##+###"###"###"##+###"###"###"##+###"##.........#',
-    '#............................................................#',
-    '#....##....................ooooo.....................##......#',
-    '#....##.......................E......................##......#',
-    '#....##..............................................##......#',
-    '#..........####...........................####...............#',
-    '#..........####...........................####...............#',
-    '#.......o..####..........o....o...........####..o............#',
-    '#..........####...........................####...............#',
-    '#............................................................#',
-    '#.................o..................o.......................#',
-    '#......####..............................####................#',
-    '#......####e...o....................o....####e...............#',
-    '#......####..............................####................#',
-    '#............................................................#',
-    '#..........e.................................................#',
-    '#..........o..............oo.oo...............o..............#',
-    '#.........................o...o..............................#',
-    '#########..######################+###########..###############',
-    '#............................................................#',
-    '#.......####.....o.................o.........####............#',
-    '#............................................................#',
-    '#...........oo...................oo..........................#',
-    '#............................................................#',
-    '#......1111..............2222..............3333..............#',
-    '#............................................................#',
-    '#............................................................#',
-    '##############################################################',
-  ],
-};
 
 /**
  * "Stepove" — a village astride a road junction, 170 by 130 metres.
  *
- * The point of this map is the ground between things. Three fireteams start in
- * the south with roughly eighty metres of open field between them and the
- * village, broken only by a treeline, two hedgerows and a drainage ditch cut
- * across the fields at an angle. A machine gun in the village covers the
- * middle of it. There is no route that avoids the open — only routes that
- * cross it in shorter pieces, which is the whole game.
+ * The ground does the teaching. Three fireteams start in the south with eighty
+ * metres of open field in front of them, rising gently to a low ridge that
+ * hides everything beyond it until you are on top of it. A drainage ditch cuts
+ * across at an angle, deep enough to crouch in and disappear. A machine gun in
+ * the village covers the middle of it all.
  *
- * Nothing here runs at a right angle unless a builder would have made it so.
+ * There is no route that avoids the open — only routes that cross it in
+ * shorter pieces, using ground that is genuinely lower than the ground beside
+ * it. That distinction is the entire reason for a heightfield.
  */
 export const STEPOVE: LevelDef = {
   id: 'stepove',
@@ -111,94 +38,107 @@ export const STEPOVE: LevelDef = {
   brief:
     'Client needs the village school cleared and held before dark. Fourteen or so ' +
     'irregulars, a belt-fed covering the open ground, and eighty metres of ploughed ' +
-    'field between you and the first building. Bound it in pieces.',
+    'field between you and the first building. Use the ditch.',
   size: { width: 170, height: 130 },
-  paint: (c) => {
-    c.of(Material.Concrete).border(2);
+  paint: (scene) => {
+    const { terrain } = scene;
 
-    // Ploughed fields and a track running through the middle of them.
-    c.of(Material.Crop).rect(2, 78, 166, 44, Tile.Floor);
-    c.of(Material.Dirt).rect(2, 2, 166, 76, Tile.Floor);
+    // --- ground: gently rolling, with a rise the village sits on and a low
+    //     ridge across the approach that makes dead ground behind it.
+    terrain.rolling(1.5, 38, 11);
+    terrain.mound(vec(92, 40), 70, 4.5);
+    terrain.bank([vec(6, 96), vec(70, 92), vec(164, 97)], 24, 3.3);
+    terrain.paint(vec(0, 82), vec(170, 130), Surface.Crop);
+    terrain.paint(vec(0, 20), vec(170, 70), Surface.Grass);
 
-    // --- the start line: a broken treeline the teams form up behind
-    c.of(Material.Hedge).polyline([vec(12, 117), vec(58, 115), vec(96, 118), vec(158, 114)], 2.2, Tile.Low);
-    c.of(Material.Crop).disc(vec(62, 116), 4, Tile.Floor);
-    c.disc(vec(120, 116), 4, Tile.Floor);
+    // --- the ditch: the one piece of ground you can cross the open inside.
+    terrain.cut([vec(14, 84), vec(78, 78), vec(152, 74)], 6.5, 1.7, Surface.Mud);
 
-    c.team(0, vec(42, 123));
-    c.team(1, vec(86, 123));
-    c.team(2, vec(130, 123));
+    // --- the road, riding over the rise rather than cutting through it.
+    terrain.road([vec(2, 64), vec(58, 60), vec(120, 58), vec(168, 55)], 7);
 
-    // --- first field: two hedgerows, neither of them straight or square
-    c.of(Material.Hedge).polyline([vec(8, 104), vec(62, 98), vec(94, 103)], 1.8, Tile.Low);
-    c.polyline([vec(108, 96), vec(140, 101), vec(162, 97)], 1.8, Tile.Low);
-    c.of(Material.Crop).scatter(10, 100, 150, 14, 16, Tile.Low, 1.6);
+    // --- vegetation: the treeline they form up behind, and field hedges.
+    hedgerow(scene, [vec(10, 118), vec(56, 116), vec(92, 119)], { radius: 1.7 });
+    hedgerow(scene, [vec(104, 117), vec(158, 115)], { radius: 1.7 });
+    hedgerow(scene, [vec(8, 103), vec(60, 99), vec(88, 103)]);
+    hedgerow(scene, [vec(110, 97), vec(150, 101)]);
+    hedgerow(scene, [vec(24, 70), vec(58, 68)], { radius: 1.2 });
 
-    // --- the drainage ditch: the one good bound position in the middle
-    c.of(Material.Dirt).polyline([vec(16, 93), vec(78, 86), vec(150, 83)], 2.6, Tile.Low);
-
-    // --- the road, running slightly off true, with its verge fence and wrecks
-    c.of(Material.Road).line(vec(4, 76), vec(166, 68), 6, Tile.Floor);
-    c.of(Material.Timber).polyline([vec(10, 71), vec(52, 69), vec(78, 67)], 1.2, Tile.Low);
-    c.of(Material.Rubble).disc(vec(46, 74), 2.6, Tile.Wall);
-    c.disc(vec(113, 71), 3.0, Tile.Wall);
-
-    // --- the village itself, houses set at whatever angle the plot allowed
+    // --- the village
     const houses: [number, number, number, number, number][] = [
-      [32, 58, 15, 11, -0.22],
-      [59, 52, 13, 10, 0.15],
-      [88, 60, 17, 12, -0.08],
-      [121, 55, 14, 11, 0.28],
-      [148, 62, 12, 10, -0.31],
-      [44, 37, 13, 11, 0.19],
-      [129, 36, 15, 11, -0.17],
+      [34, 48, 15, 11, -0.22],
+      [61, 43, 13, 10, 0.15],
+      [90, 50, 17, 12, -0.08],
+      [122, 45, 14, 11, 0.28],
+      [148, 52, 12, 10, -0.31],
+      [46, 29, 13, 11, 0.19],
+      [130, 28, 15, 11, -0.17],
     ];
-    c.of(Material.Brick);
-    for (const [x, y, w, h, angle] of houses) {
-      c.building(vec(x, y), w, h, angle, {
-        doors: [0.62],
-        windows: [0.55, 0.71, 0.12, 0.88],
+    for (const [x, y, w, d, angle] of houses) {
+      building(scene, {
+        centre: vec(x, y), width: w, depth: d, angle,
+        openings: [
+          { at: 0.62, width: 1.6, kind: 'door' },
+          { at: 0.53, width: 1.4, kind: 'window' },
+          { at: 0.72, width: 1.4, kind: 'window' },
+          { at: 0.12, width: 1.4, kind: 'window' },
+        ],
       });
     }
 
     // --- a walled yard with one way in
-    c.of(Material.Brick).polyline(
-      [vec(66, 33), vec(84, 31), vec(87, 46), vec(68, 48), vec(66, 33)],
-      1.4,
-      Tile.Wall,
-    );
-    c.of(Material.Dirt).disc(vec(77, 47), 2.2, Tile.Floor);
-    c.of(Material.Sandbag).scatter(68, 34, 17, 12, 6, Tile.Low, 1.5);
+    revetment(scene, [vec(68, 26), vec(86, 24), vec(88, 38), vec(70, 40)], Fabric.Brick, 2.2, 1.0);
+    revetment(scene, [vec(70, 40), vec(74, 40)], Fabric.Brick, 2.2, 1.0);
+    revetment(scene, [vec(72, 30), vec(82, 29)], Fabric.Sandbag);
 
-    // --- the school: the objective, and a real interior to fight through
-    c.of(Material.Concrete).building(vec(92, 22), 34, 17, 0.06, {
-      doors: [0.6, 0.1],
-      windows: [0.52, 0.58, 0.66, 0.72, 0.04, 0.16],
-      wallThickness: 1.6,
+    // --- the school: the objective, with a real interior to fight through
+    building(scene, {
+      centre: vec(94, 14), width: 34, depth: 16, angle: 0.06,
+      fabric: Fabric.Concrete, wallTop: 3.1, thickness: 1.0,
+      openings: [
+        { at: 0.60, width: 2.0, kind: 'door' },
+        { at: 0.09, width: 2.0, kind: 'door' },
+        { at: 0.52, width: 1.5, kind: 'window' },
+        { at: 0.68, width: 1.5, kind: 'window' },
+        { at: 0.15, width: 1.5, kind: 'window' },
+      ],
     });
-    // Two internal partitions, each with a gap, making three rooms.
-    c.line(vec(82, 14), vec(81, 30), 1.2, Tile.Wall);
-    c.disc(vec(81.5, 25), 1.6, Tile.Floor);
-    c.line(vec(103, 15), vec(102, 31), 1.2, Tile.Wall);
-    c.disc(vec(102.5, 26), 1.6, Tile.Floor);
-    c.objective(vec(92, 22));
+    // Two partitions with gaps, making three rooms.
+    revetment(scene, [vec(84, 6), vec(83, 22)], Fabric.Concrete, 3.1, 0.7);
+    revetment(scene, [vec(105, 7), vec(104, 23)], Fabric.Concrete, 3.1, 0.7);
 
-    // --- who is holding it
-    c.enemy(vec(88, 64), true); // the belt-fed, covering the open ground
-    c.enemy(vec(33, 61));
-    c.enemy(vec(60, 55));
-    c.enemy(vec(122, 58));
-    c.enemy(vec(148, 65));
-    c.enemy(vec(45, 40));
-    c.enemy(vec(129, 39));
-    c.enemy(vec(74, 40));
-    c.enemy(vec(79, 43));
-    c.enemy(vec(86, 26));
-    c.enemy(vec(96, 26));
-    c.enemy(vec(110, 24));
-    c.enemy(vec(70, 19));
-    c.enemy(vec(118, 78));
+    // --- sandbagged gun position covering the field, set clear of the house
+    //     behind it: a revetment laid across a doorway seals the building.
+    revetment(scene, [vec(98, 61), vec(108, 60)], Fabric.Sandbag);
+
+    // --- wrecks on the road
+    obstacle(scene, vec(48, 62), 2.4);
+    obstacle(scene, vec(116, 58), 2.8);
+
+    // --- who is where
+    scene.spawns.teams = [
+      [vec(40, 122), vec(41.6, 122), vec(43.2, 122), vec(44.8, 122)],
+      [vec(84, 122), vec(85.6, 122), vec(87.2, 122), vec(88.8, 122)],
+      [vec(128, 122), vec(129.6, 122), vec(131.2, 122), vec(132.8, 122)],
+    ];
+    scene.spawns.objectives = [vec(94, 14)];
+    scene.spawns.enemies = [
+      { pos: vec(103, 63), heavy: true },
+      { pos: vec(35, 51), heavy: false },
+      { pos: vec(62, 46), heavy: false },
+      { pos: vec(123, 48), heavy: false },
+      { pos: vec(148, 55), heavy: false },
+      { pos: vec(47, 32), heavy: false },
+      { pos: vec(131, 31), heavy: false },
+      { pos: vec(76, 32), heavy: false },
+      { pos: vec(80, 35), heavy: false },
+      { pos: vec(88, 18), heavy: false },
+      { pos: vec(98, 18), heavy: false },
+      { pos: vec(112, 16), heavy: false },
+      { pos: vec(72, 11), heavy: false },
+      { pos: vec(120, 68), heavy: false },
+    ];
   },
 };
 
-export const LEVELS: LevelDef[] = [STEPOVE, COLD_HARBOUR];
+export const LEVELS: LevelDef[] = [STEPOVE];

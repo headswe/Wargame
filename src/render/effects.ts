@@ -17,6 +17,7 @@ interface Tracer {
 
 interface Mark {
   x: number;
+  y: number;
   z: number;
   age: number;
   lethal: boolean;
@@ -84,25 +85,29 @@ export class Effects {
         if (!visible(effect.from.x, effect.from.y) && !visible(effect.to.x, effect.to.y)) continue;
         if (this.tracers.length >= MAX_TRACERS) this.tracers.shift();
         this.tracers.push({
-          // Rounds leave the weapon at chest height, not off the floor.
-          from: new THREE.Vector3(effect.from.x, 0.75, effect.from.y),
-          to: new THREE.Vector3(effect.to.x, 0.7, effect.to.y),
+          // The simulation knows the real heights now — muzzle to impact.
+          from: new THREE.Vector3(effect.from.x, effect.fromHeight, effect.from.y),
+          to: new THREE.Vector3(effect.to.x, effect.toHeight, effect.to.y),
           age: 0,
           colour: new THREE.Color(
             effect.faction === Faction.Player ? THEME.tracerPlayer : THEME.tracerHostile,
           ),
         });
       } else if (effect.kind === 'impact') {
-        if (visible(effect.at.x, effect.at.y)) this.pushMark(effect.at.x, effect.at.y, false);
+        if (visible(effect.at.x, effect.at.y)) {
+          this.pushMark(effect.at.x, effect.at.y, effect.height, false);
+        }
       } else if (effect.kind === 'hit') {
-        if (visible(effect.at.x, effect.at.y)) this.pushMark(effect.at.x, effect.at.y, true);
+        if (visible(effect.at.x, effect.at.y)) {
+          this.pushMark(effect.at.x, effect.at.y, effect.height, true);
+        }
       }
     }
   }
 
-  private pushMark(x: number, z: number, lethal: boolean): void {
+  private pushMark(x: number, z: number, y: number, lethal: boolean): void {
     if (this.marks.length >= MAX_MARKS) this.marks.shift();
-    this.marks.push({ x, z, age: 0, lethal });
+    this.marks.push({ x, y, z, age: 0, lethal });
   }
 
   update(dt: number): void {
@@ -146,7 +151,7 @@ export class Effects {
       const t = mark.age / MARK_LIFE;
       const scale = mark.lethal ? 0.6 + t * 1.5 : 0.35 + t * 0.9;
       matrix.makeScale(scale, 1, scale);
-      matrix.setPosition(mark.x, 0.04, mark.z);
+      matrix.setPosition(mark.x, mark.y + 0.04, mark.z);
       this.markMesh.setMatrixAt(count, matrix);
       this.markColour
         .set(mark.lethal ? THEME.blood : THEME.impact)

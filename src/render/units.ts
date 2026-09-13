@@ -157,7 +157,7 @@ export class UnitViews {
       const jitter = view.shake * 0.045;
       view.root.position.set(
         unit.pos.x + (Math.random() - 0.5) * jitter,
-        0,
+        unit.groundHeight,
         unit.pos.y + (Math.random() - 0.5) * jitter,
       );
       view.root.rotation.y = -unit.facing;

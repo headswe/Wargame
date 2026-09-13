@@ -1,150 +1,128 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { Tile, World, parseLevel } from '../src/sim/world.ts';
-import { coverAgainst } from '../src/sim/combat.ts';
-import { Faction, WEAPONS, makeUnit } from '../src/sim/units.ts';
+import { Fabric, Solidity } from '../src/sim/world/geometry.ts';
+import { Scene } from '../src/sim/world/scene.ts';
+import { Stature } from '../src/sim/world/occlusion.ts';
 
-/** A short wall with open ground either side of it. */
-function wallBench(): { world: World; wall: { tx: number; ty: number } } {
-  const world = parseLevel([
-    '#########',
-    '#.......#',
-    '#.......#',
-    '#..###..#',
-    '#.......#',
-    '#.......#',
-    '#########',
-  ]);
-  return { world, wall: { tx: 4, ty: 3 } };
-}
-
-function pound(world: World, tx: number, ty: number, rounds: number, damage = 26): number {
-  let collapses = 0;
-  for (let i = 0; i < rounds; i++) {
-    if (world.damageTile(tx, ty, damage)) collapses++;
-  }
-  return collapses;
-}
-
-/** Fire just enough to bring the tile down one stage, and no further. */
-function collapseOnce(world: World, tx: number, ty: number, damage = 26): void {
-  for (let i = 0; i < 4000; i++) {
-    if (world.damageTile(tx, ty, damage)) return;
-  }
-  throw new Error(`tile (${tx},${ty}) would not collapse`);
+function wallScene(fabric: Fabric = Fabric.Brick, top = 2.8): { scene: Scene; id: number } {
+  const scene = new Scene(60, 40);
+  const id = scene.structures.addSegment({
+    a: { x: 30, y: 6 }, b: { x: 30, y: 34 },
+    thickness: 1, sill: 0, top,
+    solidity: Solidity.Solid, fabric, buildingId: null,
+  }).id;
+  scene.bake();
+  return { scene, id };
 }
 
 test('a wall comes apart in two stages, and the middle one is the interesting one', () => {
-  const { world, wall } = wallBench();
-  assert.equal(world.at(wall.tx, wall.ty), Tile.Wall);
-  assert.equal(world.walkable(wall.tx, wall.ty), false);
+  const { scene, id } = wallScene();
+  const segment = scene.structures.segments[id];
 
-  // Stage one: full-height wall chews down to rubble. Still blocks movement,
-  // but no longer blocks sight — both sides can now shoot over it.
+  assert.equal(segment.solidity, Solidity.Solid);
+  assert.ok(segment.top > 2, 'it starts full height');
+
+  // Stage one: it collapses into a low run you can see and shoot over, but
+  // still cannot walk through.
   let rounds = 0;
-  while (world.at(wall.tx, wall.ty) === Tile.Wall && rounds < 2000) {
-    world.damageTile(wall.tx, wall.ty, 26);
+  while (segment.solidity === Solidity.Solid && rounds < 4000) {
+    scene.structures.damageSegment(id, 30);
     rounds++;
   }
-  assert.ok(rounds < 2000, 'a wall should not be indestructible');
-  assert.equal(world.at(wall.tx, wall.ty), Tile.Rubble, 'a wall should collapse into rubble');
-  assert.equal(world.walkable(wall.tx, wall.ty), false, 'rubble still stops a body');
+  assert.ok(rounds < 4000, 'a wall should not be indestructible');
+  assert.equal(segment.solidity, Solidity.LowCover, 'a wall collapses into rubble');
+  assert.equal(segment.fabric, Fabric.Rubble);
+  assert.ok(segment.top < 1, 'and rubble is low');
+  assert.equal(segment.destroyed, false, 'rubble still stops a body');
 
-  // Stage two: the rubble clears and the breach opens.
+  // Stage two: the rubble clears entirely.
   let more = 0;
-  while (world.at(wall.tx, wall.ty) === Tile.Rubble && more < 2000) {
-    world.damageTile(wall.tx, wall.ty, 26);
+  while (!segment.destroyed && more < 4000) {
+    scene.structures.damageSegment(id, 30);
     more++;
   }
-  assert.equal(world.at(wall.tx, wall.ty), Tile.Floor, 'rubble should clear to open ground');
-  assert.ok(world.walkable(wall.tx, wall.ty), 'a breached wall is a way through');
-  assert.ok(more < rounds, 'clearing rubble should be quicker than breaking the wall');
+  assert.ok(segment.destroyed, 'rubble should clear away');
+  assert.ok(more < rounds, 'and clearing it should be quicker than breaking the wall');
 });
 
-test('cover degrades as the thing providing it is shot away', () => {
-  const { world, wall } = wallBench();
-  // Stand just below the wall, so the wall is the cover to the north.
-  const spot = { tx: wall.tx, ty: wall.ty + 1 };
-  const node = world.coverNodeAt(spot.tx, spot.ty);
-  if (!node) throw new Error('expected a cover node beside the wall');
+test('what a thing is made of decides how long it lasts', () => {
+  const rounds = (fabric: Fabric): number => {
+    const { scene, id } = wallScene(fabric);
+    let n = 0;
+    while (!scene.structures.segments[id].destroyed && n < 6000) {
+      scene.structures.damageSegment(id, 30);
+      n++;
+    }
+    return n;
+  };
 
-  const unit = makeUnit({
-    role: 'Rifleman',
-    faction: Faction.Player,
-    squadId: 0,
-    pos: { ...node.pos },
-    weapon: WEAPONS.carbine,
-  });
-  unit.claimedNode = node;
-  unit.exposure = 0;
+  const timber = rounds(Fabric.Timber);
+  const brick = rounds(Fabric.Brick);
+  const concrete = rounds(Fabric.Concrete);
+  assert.ok(timber < brick, `timber (${timber}) should go before brick (${brick})`);
+  assert.ok(brick < concrete, `brick (${brick}) should go before concrete (${concrete})`);
+});
 
-  const threat = { x: node.pos.x, y: node.pos.y - 8 };
-  const intact = coverAgainst(world, unit, threat);
-  assert.ok(intact > 0.7, `an intact wall should be strong cover, got ${intact.toFixed(2)}`);
+test('a round finds whatever is standing where it lands', () => {
+  const { scene, id } = wallScene();
+  const before = scene.structures.segments[id].hp;
+  scene.hit(30, 20, 200);
+  assert.ok(scene.structures.segments[id].hp < before, 'the wall took the hit');
+  assert.ok(scene.dirtySegments.has(id), 'and the renderer was told');
 
-  // Chew it most of the way down without collapsing it.
-  while (world.integrityAt(wall.tx, wall.ty) > 0.1) {
-    world.damageTile(wall.tx, wall.ty, 26);
-  }
-  const battered = coverAgainst(world, unit, threat);
+  // Open ground absorbs nothing and reports nothing.
+  scene.dirtySegments.clear();
+  scene.hit(8, 20, 200);
+  assert.equal(scene.dirtySegments.size, 0);
+});
+
+test('breaching a wall opens both the sightline and the route through it', () => {
+  const scene = new Scene(60, 40);
+  // A barrier across the middle with no way round: the map edges seal it.
+  const id = scene.structures.addSegment({
+    a: { x: 30, y: -2 }, b: { x: 30, y: 42 },
+    thickness: 1.2, sill: 0, top: 3.0,
+    solidity: Solidity.Solid, fabric: Fabric.Timber, buildingId: null,
+  }).id;
+  scene.bake();
+
+  const eye = { x: 8, y: 20, eye: Stature.standingEye };
+  const man = { x: 52, y: 20, base: 0, top: Stature.standingTop };
+  assert.equal(scene.sight(eye, man).visible, false, 'the wall blocks the line');
+  assert.equal(scene.findPath({ x: 8, y: 20 }, { x: 52, y: 20 }), null, 'and the route');
+
+  // Take it down through the scene, which is the only path that keeps the
+  // occlusion field and the navmesh in step. Damaging `structures` directly
+  // changes the wall and tells nothing else about it.
+  const segment = scene.structures.segments[id];
+  let guard = 0;
+  while (!segment.destroyed && guard++ < 4000) scene.hit(30, 20, 60);
+  assert.ok(segment.destroyed, 'the wall should have come down');
+
+  assert.ok(scene.sight(eye, man).visible, 'once it is down you can see through');
+  assert.ok(scene.findPath({ x: 8, y: 20 }, { x: 52, y: 20 }), 'and walk through');
+});
+
+test('a crater reshapes the ground and the navigation over it', () => {
+  const scene = new Scene(60, 40);
+  scene.bake();
+  const before = scene.heightAt(30, 20);
+  const triangles = scene.navigation.mesh.triangleCount;
+
+  scene.crater({ x: 30, y: 20 }, 5, 2.0);
+
+  assert.ok(scene.heightAt(30, 20) < before - 1.8, 'the ground should be a hole now');
+  assert.ok(scene.dirtyTerrain.length > 0, 'and the renderer should be told to redraw it');
+  assert.ok(scene.navigation.mesh.triangleCount > 0, 'navigation should survive the reshaping');
+  void triangles;
+
+  // The hollow is worth standing in: less of you shows from across the field.
+  const eye = { x: 8, y: 20, eye: Stature.standingEye };
+  const inHole = scene.sight(eye, { x: 30, y: 20, base: 0, top: Stature.crouchedTop });
+  const beside = scene.sight(eye, { x: 30, y: 28, base: 0, top: Stature.crouchedTop });
   assert.ok(
-    battered < intact * 0.75,
-    `a battered wall should protect noticeably less: ${battered.toFixed(2)} vs ${intact.toFixed(2)}`,
+    inHole.exposure < beside.exposure,
+    `a shell hole should be cover: ${inHole.exposure.toFixed(2)} in it, ${beside.exposure.toFixed(2)} beside it`,
   );
-
-  // Collapse to rubble — still cover, but worse.
-  collapseOnce(world, wall.tx, wall.ty);
-  assert.equal(world.at(wall.tx, wall.ty), Tile.Rubble);
-  const rubble = coverAgainst(world, unit, threat);
-  assert.ok(rubble > 0, 'rubble is still worth hiding behind');
-  assert.ok(rubble < intact, 'but not as good as the wall was');
-
-  // Clear it entirely — the cover is gone and so is the claim on it.
-  node.claimedBy = unit.id;
-  collapseOnce(world, wall.tx, wall.ty);
-  assert.equal(world.at(wall.tx, wall.ty), Tile.Floor);
-  assert.equal(coverAgainst(world, unit, threat), 0, 'open ground protects nobody');
-  assert.equal(node.claimedBy, null, 'cover that no longer exists should not stay reserved');
-});
-
-test('destroying a wall opens a route that did not exist', () => {
-  const world = parseLevel([
-    '#########',
-    '#...#...#',
-    '#...#...#',
-    '#...#...#',
-    '#########',
-  ]);
-  // The centre column splits the room in two.
-  for (let ty = 1; ty <= 3; ty++) {
-    assert.equal(world.walkable(4, ty), false);
-  }
-
-  pound(world, 4, 2, 4000);
-  assert.equal(world.at(4, 2), Tile.Floor);
-  assert.ok(world.walkable(4, 2), 'the breach should be passable');
-
-  // And the cover graph knows about it: the tiles either side of the old wall
-  // lost their arc toward it.
-  const west = world.coverNodeAt(3, 2);
-  if (west) {
-    assert.ok(
-      !west.arcs.some((a) => a.dir.x === 1 && a.dir.y === 0),
-      'the tile west of the breach should no longer claim cover from it',
-    );
-  }
-});
-
-test('the change queue reports exactly the tiles that changed', () => {
-  const { world, wall } = wallBench();
-  world.changedTiles.length = 0;
-
-  pound(world, wall.tx, wall.ty, 4000);
-
-  const expected = wall.ty * world.width + wall.tx;
-  assert.ok(world.changedTiles.length >= 2, 'two collapses should be reported');
-  for (const i of world.changedTiles) {
-    assert.equal(i, expected, 'only the tile actually shot at should be reported');
-  }
 });

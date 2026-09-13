@@ -1,5 +1,5 @@
 import { type Vec2 } from './math.ts';
-import type { CoverNode } from './world.ts';
+import { Stature } from './world/occlusion.ts';
 
 export const Faction = { Player: 0, Hostile: 1 } as const;
 export type Faction = (typeof Faction)[keyof typeof Faction];
@@ -146,9 +146,12 @@ export interface Unit {
   path: Vec2[];
   pathIndex: number;
   moveMode: MoveMode;
-  /** Where this individual is headed — a cover slot, not the team's order point. */
+  /** Where this individual is headed — a fighting position, not the order point. */
   slot: Vec2 | null;
-  claimedNode: CoverNode | null;
+  /** The position they are holding, once they have arrived at it. */
+  coverSpot: Vec2 | null;
+  /** Ground height underfoot, cached each tick for the renderer. */
+  groundHeight: number;
   /** Where to look once settled, if the player dragged a facing. */
   postFacing: number | null;
 
@@ -224,7 +227,8 @@ export function makeUnit(opts: {
     pathIndex: 0,
     moveMode: MoveMode.Tactical,
     slot: null,
-    claimedNode: null,
+    coverSpot: null,
+    groundHeight: 0,
     postFacing: null,
     hp: opts.maxHp ?? 100,
     maxHp: opts.maxHp ?? 100,
@@ -249,6 +253,31 @@ export function makeUnit(opts: {
     lastShotAt: 99,
     repathTimer: 0,
   };
+}
+
+/**
+ * Eye height above the ground underfoot.
+ *
+ * This is the whole exposure trade in one number: hunkering drops your eye
+ * behind your cover and you cannot shoot, leaning out raises it and you can be
+ * shot. Nothing else has to model "leaning" — the geometry does it.
+ */
+export function eyeOf(u: Unit): number {
+  const low = u.posture === Posture.Pinned
+    ? Stature.proneEye
+    : u.posture === Posture.Crouched
+      ? Stature.crouchedEye
+      : Stature.standingEye;
+  return low + (Stature.standingEye - low) * Math.max(0, Math.min(1, u.exposure));
+}
+
+/** How much of a man there is to hit, given what he is doing. */
+export function silhouetteOf(u: Unit): number {
+  if (u.posture === Posture.Pinned) return Stature.proneTop;
+  if (u.posture === Posture.Crouched) {
+    return Stature.crouchedTop + (Stature.standingTop - Stature.crouchedTop) * u.exposure * 0.6;
+  }
+  return Stature.standingTop;
 }
 
 export const isFighting = (u: Unit): boolean => u.state === UnitState.Active;

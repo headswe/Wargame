@@ -1,59 +1,62 @@
 import * as THREE from 'three';
-import { type Vec2, dot, normalize, sub } from '../sim/math.ts';
-import type { World } from '../sim/world.ts';
+import { type Vec2, dist, normalize, sub } from '../sim/math.ts';
 import { Faction, UnitState } from '../sim/units.ts';
 import type { Sim } from '../sim/sim.ts';
 import { THEME } from './theme.ts';
 
-const MAX_PIPS = 1800;
+const MAX_PATCHES = 300;
 const MAX_GHOSTS = 48;
-const COVER_PREVIEW_RADIUS = 5;
+const COVER_PREVIEW_RADIUS = 10;
+/** How far out the notional threat sits when scoring ground. */
+const THREAT_DISTANCE = 70;
 
 /**
- * The readability layer, and the reason an isometric 3D tactics game is
- * playable at all.
+ * The readability layer.
  *
- * A player looking at a 3D scene genuinely cannot tell which side of a wall is
- * safe. Cover pips answer that directly: a bar drawn on the face that protects
- * you, green where it is solid, amber where it is only waist-high.
+ * With cover measured rather than tabulated, there are no cover nodes left to
+ * draw pips on — and what replaces them is better. Hovering an order samples
+ * the ground the team would occupy and colours each candidate by how much of a
+ * man would show from the direction the trouble is in. The player reads the
+ * actual answer to the actual question, including for ground whose cover comes
+ * from a fold in the earth rather than from anything you could point at.
  */
 export class Markers {
   readonly group = new THREE.Group();
 
-  private readonly pips: THREE.InstancedMesh;
+  private readonly patches: THREE.InstancedMesh;
   private readonly ghosts: THREE.InstancedMesh;
   private readonly destination: THREE.Mesh;
   private readonly facingArrow: THREE.Mesh;
   private readonly objective: THREE.Mesh;
 
   private readonly colour = new THREE.Color();
+  private readonly good = new THREE.Color(0x5ad6b0);
+  private readonly fair = new THREE.Color(0xd6b45a);
+  private readonly bad = new THREE.Color(0xd65a5a);
   private readonly matrix = new THREE.Matrix4();
-  private readonly quaternion = new THREE.Quaternion();
-  private readonly scale = new THREE.Vector3(1, 1, 1);
-  private readonly position = new THREE.Vector3();
-  private readonly up = new THREE.Vector3(0, 1, 0);
 
   private hover: Vec2 | null = null;
-  private hoverThreat: Vec2 = { x: 0, y: -1 };
+  private overlay = false;
   private pulse = 0;
-  private coverOverlay = false;
+  private refreshIn = 0;
+  private lastSampledAt: Vec2 | null = null;
 
   constructor(sim: Sim) {
     this.group.name = 'markers';
 
-    const pipGeometry = new THREE.BoxGeometry(0.1, 0.06, 0.52);
-    pipGeometry.translate(0.42, 0, 0);
-    this.pips = new THREE.InstancedMesh(
-      pipGeometry,
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false }),
-      MAX_PIPS,
+    const patch = new THREE.CircleGeometry(0.55, 10);
+    patch.rotateX(-Math.PI / 2);
+    this.patches = new THREE.InstancedMesh(
+      patch,
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false }),
+      MAX_PATCHES,
     );
-    this.pips.frustumCulled = false;
-    this.pips.count = 0;
-    this.pips.renderOrder = 20;
-    this.group.add(this.pips);
+    this.patches.frustumCulled = false;
+    this.patches.count = 0;
+    this.patches.renderOrder = 20;
+    this.group.add(this.patches);
 
-    const ghostGeometry = new THREE.RingGeometry(0.3, 0.45, 16);
+    const ghostGeometry = new THREE.RingGeometry(0.5, 0.8, 16);
     ghostGeometry.rotateX(-Math.PI / 2);
     this.ghosts = new THREE.InstancedMesh(
       ghostGeometry,
@@ -67,7 +70,7 @@ export class Markers {
     this.ghosts.renderOrder = 21;
     this.group.add(this.ghosts);
 
-    const destGeometry = new THREE.RingGeometry(0.55, 0.75, 24);
+    const destGeometry = new THREE.RingGeometry(0.9, 1.2, 24);
     destGeometry.rotateX(-Math.PI / 2);
     this.destination = new THREE.Mesh(
       destGeometry,
@@ -80,13 +83,13 @@ export class Markers {
     this.group.add(this.destination);
 
     const arrowShape = new THREE.Shape();
-    arrowShape.moveTo(0, -0.22);
-    arrowShape.lineTo(1.5, -0.22);
-    arrowShape.lineTo(1.5, -0.5);
-    arrowShape.lineTo(2.3, 0);
-    arrowShape.lineTo(1.5, 0.5);
-    arrowShape.lineTo(1.5, 0.22);
-    arrowShape.lineTo(0, 0.22);
+    arrowShape.moveTo(0, -0.3);
+    arrowShape.lineTo(2.2, -0.3);
+    arrowShape.lineTo(2.2, -0.75);
+    arrowShape.lineTo(3.4, 0);
+    arrowShape.lineTo(2.2, 0.75);
+    arrowShape.lineTo(2.2, 0.3);
+    arrowShape.lineTo(0, 0.3);
     const arrowGeometry = new THREE.ShapeGeometry(arrowShape);
     arrowGeometry.rotateX(-Math.PI / 2);
     this.facingArrow = new THREE.Mesh(
@@ -99,7 +102,7 @@ export class Markers {
     this.facingArrow.renderOrder = 22;
     this.group.add(this.facingArrow);
 
-    const objectiveGeometry = new THREE.RingGeometry(0.8, 1.05, 28);
+    const objectiveGeometry = new THREE.RingGeometry(1.4, 1.9, 28);
     objectiveGeometry.rotateX(-Math.PI / 2);
     this.objective = new THREE.Mesh(
       objectiveGeometry,
@@ -107,24 +110,28 @@ export class Markers {
         color: THEME.objective, transparent: true, opacity: 0.7, depthWrite: false,
       }),
     );
-    this.objective.position.set(sim.objective.x, 0.05, sim.objective.y);
+    this.objective.position.set(
+      sim.objective.x,
+      sim.scene.heightAt(sim.objective.x, sim.objective.y) + 0.12,
+      sim.objective.y,
+    );
     this.objective.renderOrder = 22;
     this.group.add(this.objective);
   }
 
   toggleCoverOverlay(): boolean {
-    this.coverOverlay = !this.coverOverlay;
-    return this.coverOverlay;
+    this.overlay = !this.overlay;
+    this.lastSampledAt = null;
+    return this.overlay;
   }
 
-  setHover(pos: Vec2 | null, threat: Vec2 | null): void {
+  setHover(pos: Vec2 | null): void {
     this.hover = pos;
-    if (threat) this.hoverThreat = threat;
   }
 
-  showFacingArrow(from: Vec2, angle: number): void {
+  showFacingArrow(from: Vec2, angle: number, height: number): void {
     this.facingArrow.visible = true;
-    this.facingArrow.position.set(from.x, 0.07, from.y);
+    this.facingArrow.position.set(from.x, height + 0.14, from.y);
     this.facingArrow.rotation.y = -angle;
   }
 
@@ -136,71 +143,69 @@ export class Markers {
     this.pulse += dt;
     const breathe = 1 + Math.sin(this.pulse * 2.4) * 0.06;
     this.objective.scale.set(breathe, 1, breathe);
-    this.objective.visible = sim.isVisible(
-      Math.floor(sim.objective.x), Math.floor(sim.objective.y),
-    ) || sim.exploredTiles[Math.floor(sim.objective.y) * sim.world.width + Math.floor(sim.objective.x)] === 1;
+    this.objective.visible = sim.isVisible(sim.objective.x, sim.objective.y)
+      || sim.exploredTiles[Math.floor(sim.objective.y) * sim.fogCols + Math.floor(sim.objective.x)] === 1;
 
-    this.destination.visible = this.hover !== null;
-    if (this.hover) this.destination.position.set(this.hover.x, 0.05, this.hover.y);
+    this.destination.visible = this.hover !== null && selectedSquads.size > 0;
+    if (this.hover && this.destination.visible) {
+      this.destination.position.set(
+        this.hover.x, sim.scene.heightAt(this.hover.x, this.hover.y) + 0.12, this.hover.y,
+      );
+    }
 
-    this.updatePips(sim, selectedSquads);
+    this.refreshIn -= dt;
+    this.updateCover(sim, selectedSquads);
     this.updateGhosts(sim);
   }
 
   /**
-   * Two sources of pips: cover the selected team is currently holding (so you
-   * can see what they are protected from right now), and cover around the
-   * cursor (so you can see what an order would buy you before you give it).
+   * Sampling cover costs a couple of hundred sightlines, so it is recomputed
+   * only when the cursor has actually moved somewhere new — at a few hundred
+   * microseconds a go that is free, but not free enough to redo every frame.
    */
-  private updatePips(sim: Sim, selectedSquads: Set<number>): void {
-    let count = 0;
+  private updateCover(sim: Sim, selectedSquads: Set<number>): void {
+    const active = this.overlay || (this.hover !== null && selectedSquads.size > 0);
+    if (!active) {
+      this.patches.count = 0;
+      this.lastSampledAt = null;
+      return;
+    }
+    const at = this.hover;
+    if (!at) return;
 
-    const draw = (pos: Vec2, dir: Vec2, value: number, aligned: boolean): void => {
-      if (count >= MAX_PIPS) return;
-      this.position.set(pos.x, 0.05, pos.y);
-      this.quaternion.setFromAxisAngle(this.up, -Math.atan2(dir.y, dir.x));
-      this.scale.set(1, 1, value > 0.7 ? 1 : 0.8);
-      this.matrix.compose(this.position, this.quaternion, this.scale);
-      this.pips.setMatrixAt(count, this.matrix);
-      this.colour
-        .set(value > 0.7 ? THEME.coverPip : THEME.coverPipWeak)
-        .multiplyScalar(aligned ? 1 : 0.45);
-      this.pips.setColorAt(count, this.colour);
-      count++;
+    const moved = !this.lastSampledAt || dist(this.lastSampledAt, at) > 1.5;
+    if (!moved && this.refreshIn > 0) return;
+    this.refreshIn = 0.12;
+    this.lastSampledAt = { ...at };
+
+    const threatDir = inferThreat(sim, selectedSquads, at);
+    const threat = {
+      x: at.x + threatDir.x * THREAT_DISTANCE,
+      y: at.y + threatDir.y * THREAT_DISTANCE,
     };
+    const spots = sim.scene.findCover(at, COVER_PREVIEW_RADIUS, threat, { samples: 72 });
 
-    for (const unit of sim.unitList) {
-      if (unit.faction !== Faction.Player || unit.state !== UnitState.Active) continue;
-      if (!selectedSquads.has(unit.squadId) || !unit.claimedNode) continue;
-      if (Math.hypot(unit.pos.x - unit.claimedNode.pos.x, unit.pos.y - unit.claimedNode.pos.y) > 0.5) continue;
-      for (const arc of unit.claimedNode.arcs) {
-        draw(unit.claimedNode.pos, arc.dir, arc.value, true);
-      }
+    let count = 0;
+    for (const spot of spots) {
+      if (count >= MAX_PATCHES) break;
+      this.matrix.makeScale(1, 1, 1);
+      this.matrix.setPosition(
+        spot.pos.x, sim.scene.heightAt(spot.pos.x, spot.pos.y) + 0.08, spot.pos.y,
+      );
+      this.patches.setMatrixAt(count, this.matrix);
+
+      // Green where little of you would show, red where all of you would.
+      if (spot.exposure < 0.4) this.colour.copy(this.good).lerp(this.fair, spot.exposure / 0.4);
+      else this.colour.copy(this.fair).lerp(this.bad, (spot.exposure - 0.4) / 0.6);
+      // Ground you cannot shoot from is a hiding place, not a position.
+      if (!spot.canFire) this.colour.multiplyScalar(0.4);
+      this.patches.setColorAt(count, this.colour);
+      count++;
     }
 
-    const world: World = sim.world;
-    if (this.coverOverlay) {
-      // Every piece of cover the player has actually laid eyes on.
-      for (const node of world.coverNodes) {
-        if (sim.exploredTiles[node.ty * world.width + node.tx] !== 1) continue;
-        for (const arc of node.arcs) {
-          draw(node.pos, arc.dir, arc.value, dot(arc.dir, this.hoverThreat) > 0.2);
-        }
-      }
-    } else if (this.hover && selectedSquads.size > 0) {
-      for (const node of world.coverNear(this.hover, COVER_PREVIEW_RADIUS)) {
-        for (const arc of node.arcs) {
-          // Dim the arcs that face the wrong way — they are cover from
-          // something, but not from what the team is about to face.
-          const aligned = dot(arc.dir, this.hoverThreat) > 0.2;
-          draw(node.pos, arc.dir, arc.value, aligned);
-        }
-      }
-    }
-
-    this.pips.count = count;
-    this.pips.instanceMatrix.needsUpdate = true;
-    if (this.pips.instanceColor) this.pips.instanceColor.needsUpdate = true;
+    this.patches.count = count;
+    this.patches.instanceMatrix.needsUpdate = true;
+    if (this.patches.instanceColor) this.patches.instanceColor.needsUpdate = true;
   }
 
   /**
@@ -222,7 +227,7 @@ export class Markers {
     let count = 0;
     for (const [, pos] of remembered) {
       if (count >= MAX_GHOSTS) break;
-      this.matrix.makeTranslation(pos.x, 0.05, pos.y);
+      this.matrix.makeTranslation(pos.x, sim.scene.heightAt(pos.x, pos.y) + 0.1, pos.y);
       this.ghosts.setMatrixAt(count++, this.matrix);
     }
     this.ghosts.count = count;
@@ -238,7 +243,7 @@ export function inferThreat(sim: Sim, squadIds: Set<number>, dest: Vec2): Vec2 {
   for (const unit of sim.unitList) {
     if (unit.faction !== Faction.Player || !squadIds.has(unit.squadId)) continue;
     for (const [, memory] of unit.memory) {
-      const d = Math.hypot(memory.pos.x - dest.x, memory.pos.y - dest.y);
+      const d = dist(memory.pos, dest);
       if (d < nearestDistance) {
         nearestDistance = d;
         nearest = memory.pos;
@@ -246,7 +251,7 @@ export function inferThreat(sim: Sim, squadIds: Set<number>, dest: Vec2): Vec2 {
     }
   }
 
-  if (nearest && nearestDistance < 40) {
+  if (nearest && nearestDistance < 90) {
     const dir = normalize(sub(nearest, dest));
     if (dir.x !== 0 || dir.y !== 0) return dir;
   }

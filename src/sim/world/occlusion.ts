@@ -50,6 +50,10 @@ export class OcclusionField {
   readonly coverTop: Float32Array;
   /** 0..1 density of whatever is growing there. */
   readonly density: Float32Array;
+  /** Which segment put the solid height here, so a round can damage it. */
+  readonly segmentAt: Int32Array;
+  /** Which prop put it here, if a prop did. */
+  readonly propAt: Int32Array;
 
   constructor(width: number, height: number, cellSize = 0.5) {
     this.cellSize = cellSize;
@@ -59,6 +63,8 @@ export class OcclusionField {
     this.solidTop = new Float32Array(this.cols * this.rows).fill(-Infinity);
     this.coverTop = new Float32Array(this.cols * this.rows).fill(-Infinity);
     this.density = new Float32Array(this.cols * this.rows);
+    this.segmentAt = new Int32Array(this.cols * this.rows).fill(-1);
+    this.propAt = new Int32Array(this.cols * this.rows).fill(-1);
   }
 
   build(terrain: Terrain, structures: Structures): void {
@@ -84,6 +90,8 @@ export class OcclusionField {
         this.solidTop[k] = -Infinity;
         this.coverTop[k] = -Infinity;
         this.density[k] = 0;
+        this.segmentAt[k] = -1;
+        this.propAt[k] = -1;
         this.blockTop[k] = terrain.heightAt((i + 0.5) * this.cellSize, (j + 0.5) * this.cellSize);
       }
     }
@@ -132,6 +140,7 @@ export class OcclusionField {
           this.density[k] = Math.max(this.density[k], 0.75);
         } else if (top > this.solidTop[k]) {
           this.solidTop[k] = top;
+          this.segmentAt[k] = segment.id;
           if (top > this.blockTop[k]) this.blockTop[k] = top;
         }
       }
@@ -161,10 +170,20 @@ export class OcclusionField {
           this.density[k] = Math.max(this.density[k], 0.7);
         } else if (top > this.solidTop[k]) {
           this.solidTop[k] = top;
+          this.propAt[k] = prop.id;
           if (top > this.blockTop[k]) this.blockTop[k] = top;
         }
       }
     }
+  }
+
+  /** What occupies a cell, so fire can be attributed to something breakable. */
+  occupantAt(x: number, y: number): { segment: number; prop: number } {
+    const i = Math.floor(x / this.cellSize);
+    const j = Math.floor(y / this.cellSize);
+    if (i < 0 || j < 0 || i >= this.cols || j >= this.rows) return { segment: -1, prop: -1 };
+    const k = j * this.cols + i;
+    return { segment: this.segmentAt[k], prop: this.propAt[k] };
   }
 
   solidAt(x: number, y: number): number {

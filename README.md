@@ -116,88 +116,35 @@ o  low cover — blocks movement, shoot over it, good protection
 X  objective
 ```
 
-## Two scales, one ruleset
+## The world
 
-`Cold Harbour` is a 73 m walled compound — the close-quarters mission, where the
-median clear line of sight from the start is **6 m**. `Stepove` is a 170 m
-village where that same measurement is **68 m**, and first contact happens at a
-median of 47 m.
-
-That gap is the point. Weapon ranges, spotting and movement are tuned once, for
-both, because a contract should be able to be an office block or a field in
-Ukraine without changing the rules underneath.
-
-## Destruction
-
-Walls have hit points and a material. Rounds that go wide put their energy into
-the scenery, and cover wears out in two stages:
-
-```
-wall  ──fire──▶  rubble  ──fire──▶  open ground
-      blocks           blocks           passable
-      sight            movement         breach
-```
-
-The middle stage is the interesting one: a wall you were safe behind becomes
-something you can both shoot over, and a position turns from cover into a
-firefight without anybody moving. Cover value falls continuously with integrity
-as well, so a battered wall is worth measurably less before it collapses.
-
-Small arms **degrade** cover; they rarely breach it. Putting a hole through
-masonry is what explosives are for, and indirect fire is not in yet.
-
-## Levels are authored two ways
-
-Tight interiors stay ASCII — a floorplan you can read in a diff. Anything at
-village scale is painted from primitives (`src/sim/levelgen.ts`): thick line
-segments at any angle, buildings at any rotation, scattered cover. That is what
-lets a hedgerow run at 23 degrees instead of snapping to the compass, and it is
-deliberately the shape the world wants to become — vector geometry rasterised
-for the simulation.
-
-## The new world model (built, not yet wired in)
-
-`src/sim/world/` and `src/sim/nav/` are the foundation the game is moving onto.
-They are tested and benchmarked but not yet driving the playable build, so the
-grid game above still runs while this is finished.
-
-**Terrain is a heightfield.** Elevation is what lets ground do tactical work:
+Terrain is a **heightfield**, and that is what lets ground do tactical work:
 dead ground you can cross unseen, a reverse slope a defender sits behind, and a
 ditch you are genuinely *below* rather than beside. Roads and ditches are
 operations on the surface rather than objects placed on it — a road flattens
 across its width while still riding over the hill it crosses, a ditch cuts down,
-a crater deforms and throws up a lip.
+a shell deforms the ground and throws up a lip.
 
-**Structures are vectors.** Wall runs at any angle, with a fabric, hit points,
-and a `sill`/`top` pair so one type expresses a full wall, a waist-high
-revetment and a window band. Props add the category the grid could not: bushes
-are *concealment*, not cover — they hide you without stopping anything.
+Structures are **vector segments** at any angle, with a fabric, hit points, and
+a sill/top pair so one type covers a full wall, a waist-high revetment and a
+window band. Props carry the category a grid cannot express: bushes are
+**concealment, not cover** — they hide you without stopping anything.
 
-**Navigation is a Recast-style navmesh.** Voxelise walkability from slope and
+Navigation is a **Recast-style navmesh**: voxelise walkability from slope and
 obstacles, distance-transform and erode by the agent radius, trace contours off
 the cell boundaries, simplify, triangulate with holes, then A* across cells and
-pull the corridor taut with the funnel algorithm. Because the world is
-single-storey there is exactly one walkable surface per column, which removes
-Recast's span-merging stage entirely.
+pull the corridor taut with the funnel algorithm. Single-storey means one
+walkable surface per column, which removes Recast's span-merging entirely.
 
-On a 170 x 130 m village with seven angled buildings:
+## Cover is a calculation, not a table
 
-```
-navmesh                943 triangles from 680 x 520 cells
-path query             0.127 ms          (mean 1.38x straight-line)
-rebuild after a breach ~12 ms steady state
-sightline              2.12 us over 100 m (~17 ms per second at full load)
-```
+A sightline solves for the lowest point on the target that clears every
+obstruction on the way. An obstruction of height `H` at fraction `t` of the way
+hides everything below `eye + (H - eye) / t`, so the highest such value is the
+target's waterline: below it hidden, above it exposed. One pass answers "can I
+see him" and "how much of him" together.
 
-**Cover is one calculation, not a table.** A sightline solves for the lowest
-point on the target that clears every obstruction along the way. An obstruction
-of height `H` at fraction `t` of the way there hides everything below
-`eye + (H - eye) / t`, so the highest such value over the walk is the target's
-waterline: below it hidden, above it exposed. One pass answers "can I see him"
-and "how much of him" together, and a wall, a crest, a ditch lip and a
-crouching man all become the same arithmetic.
-
-What falls out of it, with no special case for any of them:
+What falls out, with no special case for any of it:
 
 ```
 a man at 100 m                          standing   crouched
@@ -209,20 +156,24 @@ a man at 100 m                          standing   crouched
   ...from on top of that ridge               100%         -
 ```
 
-Hugging your cover matters; cover you are merely near does not. A ditch is
-defilade rather than a bump. Height sees over. And a hedgerow reports 100%
-exposure with 100% concealment — vegetation hides you without stopping a
-single round, which is a distinction the tile world had no way to make.
+Hugging cover matters; cover you are merely near does not. A ditch is defilade.
+Height sees over. And a hedgerow reads 100% exposure with 100% concealment.
 
-Two things in there are load-bearing and easy to get wrong:
+Hovering an order samples the ground a team would occupy and colours each
+candidate by how much of a man would show from where the trouble is — including
+ground whose cover comes from a fold in the earth rather than anything you could
+point at.
 
-- The erosion radius includes the contour simplification tolerance. Douglas-
-  Peucker moves vertices outward as readily as inward, so without that margin a
-  simplified contour bulges into cleared space and a funnelled path cuts the
-  corner through a wall.
-- Clearance is capped at the erosion radius, which is what makes a regional
-  rebuild exact rather than approximate: a change cannot alter any distance
-  further away than the cap.
+## Numbers
+
+```
+scene build            ~215 ms at mission start
+simulation             0.36 ms/tick        (2% of a 60 Hz budget)
+navmesh                ~1170 triangles
+path query             0.13 ms             (mean 1.38x straight-line)
+sightline              2.12 us over 100 m  (~17 ms/s at full load)
+rebuild after a breach ~12 ms steady state
+```
 
 ## What is deliberately not here yet
 

@@ -1,10 +1,7 @@
-import {
-  type Vec2, clamp, dist, distPointToSegment, dot, invLerpClamped, normalize, sub,
-} from './math.ts';
+import { type Vec2, clamp, dist, distPointToSegment, invLerpClamped } from './math.ts';
 import type { Rng } from './rng.ts';
-import type { World } from './world.ts';
-import { trace } from './los.ts';
-import { MoveMode, Posture, UnitState, type Unit, isMoving } from './units.ts';
+import type { Scene } from './world/scene.ts';
+import { MoveMode, Posture, UnitState, type Unit, eyeOf, isMoving, silhouetteOf } from './units.ts';
 
 /** Above this, an operator stops being a shooter and becomes a passenger. */
 export const PIN_THRESHOLD = 0.72;
@@ -14,7 +11,9 @@ export const SUPPRESSION_DECAY = 0.25;
 export interface ShotEffect {
   kind: 'shot';
   from: Vec2;
+  fromHeight: number;
   to: Vec2;
+  toHeight: number;
   hit: boolean;
   shooterId: number;
   faction: number;
@@ -23,6 +22,7 @@ export interface ShotEffect {
 export interface HitEffect {
   kind: 'hit';
   at: Vec2;
+  height: number;
   targetId: number;
   lethal: boolean;
 }
@@ -30,71 +30,19 @@ export interface HitEffect {
 export interface ImpactEffect {
   kind: 'impact';
   at: Vec2;
+  height: number;
 }
 
 export type Effect = ShotEffect | HitEffect | ImpactEffect;
 
-/**
- * How much protection `unit` has from fire arriving out of `fromPos`.
- *
- * Cover is directional and it is not free: an operator leaning out to return
- * fire gives up a chunk of it. That trade — shoot or stay safe — is the whole
- * reason suppression works as a mechanic.
- */
-export function coverAgainst(world: World, unit: Unit, fromPos: Vec2): number {
-  const node = unit.claimedNode;
-  if (!node || node.arcs.length === 0) return 0;
-  // You only get cover if you are actually in it, not merely heading there.
-  if (dist(unit.pos, node.pos) > 0.5) return 0;
-
-  const toThreat = normalize(sub(fromPos, unit.pos));
-  let best = 0;
-  for (const arc of node.arcs) {
-    const alignment = dot(arc.dir, toThreat);
-    if (alignment <= 0.25) continue;
-    // Full value head-on, tapering to nothing as the threat works around.
-    const falloff = invLerpClamped(alignment, 0.25, 0.72);
-    // A wall that has been shot to bits still stops something, but not much.
-    // This is what makes a long exchange against one piece of cover slowly
-    // turn a safe position into an untenable one.
-    const integrity = world.integrityAt(node.tx + arc.dir.x, node.ty + arc.dir.y);
-    best = Math.max(best, arc.value * falloff * (0.4 + 0.6 * integrity));
-  }
-  return best * (1 - unit.exposure * 0.45);
-}
-
-/**
- * Which tile is doing the protecting against fire from `fromPos`. Misses need
- * this: rounds that go wide still slam into the cover, and that is how cover
- * wears out.
- */
-function shieldingTile(unit: Unit, fromPos: Vec2): { tx: number; ty: number } | null {
-  const node = unit.claimedNode;
-  if (!node || node.arcs.length === 0) return null;
-  const toThreat = normalize(sub(fromPos, unit.pos));
-  let best: { tx: number; ty: number } | null = null;
-  let bestAlignment = 0.25;
-  for (const arc of node.arcs) {
-    const alignment = dot(arc.dir, toThreat);
-    if (alignment > bestAlignment) {
-      bestAlignment = alignment;
-      best = { tx: node.tx + arc.dir.x, ty: node.ty + arc.dir.y };
-    }
-  }
-  return best;
-}
-
 function rangeFactor(d: number, optimal: number, max: number): number {
   if (d <= optimal) return 1;
   if (d >= max) return 0.1;
-  const t = (d - optimal) / (max - optimal);
-  return 1 - 0.9 * Math.pow(t, 1.35);
+  return 1 - 0.9 * Math.pow((d - optimal) / (max - optimal), 1.35);
 }
 
 function shooterStanceFactor(u: Unit): number {
-  if (isMoving(u)) {
-    return u.moveMode === MoveMode.Sprint ? 0 : 0.5;
-  }
+  if (isMoving(u)) return u.moveMode === MoveMode.Sprint ? 0 : 0.5;
   return u.posture === Posture.Crouched ? 1.12 : 1;
 }
 
@@ -105,37 +53,55 @@ function targetMotionFactor(t: Unit): number {
 
 export interface HitBreakdown {
   chance: number;
-  cover: number;
+  /** 0..1 of the target's silhouette that is in the open. */
+  exposure: number;
+  /** 0..1 vegetation on the line. Hides, does not protect. */
+  concealment: number;
   range: number;
   blocked: boolean;
 }
 
-/** Full hit-chance breakdown — the UI shows these numbers, so keep them honest. */
-export function hitChance(
-  world: World,
-  shooter: Unit,
-  target: Unit,
-): HitBreakdown {
-  const d = dist(shooter.pos, target.pos);
-  const t = trace(world, shooter.pos, target.pos);
-  if (!t.clear || d > shooter.weapon.maxRange) {
-    return { chance: 0, cover: 0, range: d, blocked: true };
+/**
+ * Hit chance, with cover expressed as the fraction of the target actually
+ * showing.
+ *
+ * There is no cover term to look up any more. A wall, a crest, the lip of a
+ * ditch and the fact that he is crouching all arrive through the same number,
+ * because they are all just geometry between two points.
+ */
+export function hitChance(scene: Scene, shooter: Unit, target: Unit): HitBreakdown {
+  const sighting = scene.sight(
+    { x: shooter.pos.x, y: shooter.pos.y, eye: eyeOf(shooter) },
+    { x: target.pos.x, y: target.pos.y, base: 0, top: silhouetteOf(target) },
+    shooter.weapon.maxRange,
+  );
+
+  if (!sighting.visible) {
+    return {
+      chance: 0, exposure: 0, concealment: sighting.concealment,
+      range: sighting.distance, blocked: true,
+    };
   }
 
-  const cover = coverAgainst(world, target, shooter.pos);
-  const obstruction = Math.min(0.5, t.lowCrossed * 0.13);
-
   let p = shooter.weapon.accuracy;
-  p *= rangeFactor(d, shooter.weapon.optimalRange, shooter.weapon.maxRange);
+  p *= rangeFactor(sighting.distance, shooter.weapon.optimalRange, shooter.weapon.maxRange);
   p *= shooterStanceFactor(shooter);
   p *= 1 - shooter.suppression * 0.78;
   p *= shooter.weaponReady;
-  p *= 1 - cover;
+  p *= sighting.exposure;
   p *= targetMotionFactor(target);
-  p *= 1 - obstruction;
+  // Foliage does not stop a round, but it does stop you aiming at what is
+  // behind it.
+  p *= 1 - sighting.concealment * 0.55;
   if (shooter.posture === Posture.Pinned) p *= 0.2;
 
-  return { chance: clamp(p, 0, 0.95), cover, range: d, blocked: false };
+  return {
+    chance: clamp(p, 0, 0.95),
+    exposure: sighting.exposure,
+    concealment: sighting.concealment,
+    range: sighting.distance,
+    blocked: false,
+  };
 }
 
 /**
@@ -155,8 +121,9 @@ export function applySuppressionAlong(
     if (u.faction === shooterFaction) continue;
     const d = distPointToSegment(u.pos, from, to);
     if (d > 1.8) continue;
-    const proximity = 1 - invLerpClamped(d, 0.3, 1.8);
-    u.suppression = clamp(u.suppression + power * 0.022 * proximity, 0, 1);
+    u.suppression = clamp(
+      u.suppression + power * 0.022 * (1 - invLerpClamped(d, 0.3, 1.8)), 0, 1,
+    );
   }
 }
 
@@ -169,26 +136,28 @@ export interface ShotOutcome {
 
 /** Resolve one round. Misses still land somewhere, and that somewhere matters. */
 export function resolveShot(
-  world: World,
+  scene: Scene,
   rng: Rng,
   units: Unit[],
   shooter: Unit,
   target: Unit,
   effects: Effect[],
 ): ShotOutcome {
-  const breakdown = hitChance(world, shooter, target);
+  const breakdown = hitChance(scene, shooter, target);
   const hit = !breakdown.blocked && rng.chance(breakdown.chance);
 
+  const fromHeight = scene.heightAt(shooter.pos.x, shooter.pos.y) + eyeOf(shooter);
   let impact: Vec2;
+  let impactHeight: number;
   let damage = 0;
   let killedOrDowned = false;
 
   if (hit) {
     impact = { ...target.pos };
+    impactHeight = scene.heightAt(target.pos.x, target.pos.y) + silhouetteOf(target) * 0.6;
     const headshot = rng.chance(0.07);
     damage = shooter.weapon.damage * rng.range(0.85, 1.15) * (headshot ? 2.2 : 1);
     target.hp -= damage;
-    // Being hit is its own kind of suppression.
     target.suppression = clamp(target.suppression + 0.22, 0, 1);
     if (target.hp <= 0) {
       target.hp = 0;
@@ -196,48 +165,36 @@ export function resolveShot(
       target.bleedout = 42;
       target.path = [];
       target.pathIndex = 0;
-      if (target.claimedNode) {
-        target.claimedNode.claimedBy = null;
-        target.claimedNode = null;
-      }
+      target.coverSpot = null;
       killedOrDowned = true;
     }
-    effects.push({ kind: 'hit', at: impact, targetId: target.id, lethal: killedOrDowned });
+    effects.push({ kind: 'hit', at: impact, height: impactHeight, targetId: target.id, lethal: killedOrDowned });
   } else {
     // A miss scatters off the aim point, further out at longer range.
-    const d = breakdown.range;
-    const spread = 0.35 + d * 0.055 * (1 - breakdown.chance);
-    const aim = {
+    const spread = 0.35 + breakdown.range * 0.055 * (1 - breakdown.chance);
+    impact = {
       x: target.pos.x + rng.gaussian() * spread,
       y: target.pos.y + rng.gaussian() * spread,
     };
-    const t = trace(world, shooter.pos, aim);
-    impact = t.hit ?? aim;
-    effects.push({ kind: 'impact', at: impact });
+    impactHeight = scene.heightAt(impact.x, impact.y) + 0.5;
+    effects.push({ kind: 'impact', at: impact, height: impactHeight });
 
-    // Rounds that go wide put their energy into the scenery. Either they strike
-    // something full-height on the way, or they hammer the cover the target is
-    // tucked behind — both wear it down.
-    const struck = t.hitTile ?? shieldingTile(target, shooter.pos);
-    if (struck) world.damageTile(struck.tx, struck.ty, shooter.weapon.damage);
+    // Rounds that go wide put their energy into the scenery. Cover wears out.
+    scene.hit(impact.x, impact.y, shooter.weapon.damage);
   }
 
   effects.push({
     kind: 'shot',
     from: { ...shooter.pos },
+    fromHeight,
     to: impact,
+    toHeight: impactHeight,
     hit,
     shooterId: shooter.id,
     faction: shooter.faction,
   });
 
-  applySuppressionAlong(
-    units,
-    shooter.pos,
-    impact,
-    shooter.faction,
-    shooter.weapon.suppressionPower,
-  );
-
+  applySuppressionAlong(units, shooter.pos, impact, shooter.faction, shooter.weapon.suppressionPower);
+  void dist;
   return { hit, impact, damage, killedOrDowned };
 }
