@@ -48,6 +48,7 @@ export class Hud {
           <div><b>Right-click</b> move tactically &middot; <b>double right-click</b> run</div>
           <div><b>Right-click + drag</b> set the arc they face on arrival</div>
           <div><b>Left-click / drag</b> select &middot; <b>1&ndash;3 / Tab</b> pick a team</div>
+          <div><b>G</b> frag at the cursor &middot; <b>T</b> smoke &middot; <b>F</b> cover overlay</div>
           <div><b>Q / E</b> rotate &middot; <b>WASD</b> pan &middot; <b>Space</b> centre on team</div>
         </div>
       </div>
@@ -136,12 +137,21 @@ export class Hud {
       state = 'combat ineffective';
     }
 
+    // What the team can still do about a position it cannot shoot, and about
+    // ground it cannot cross. Both are decisions, so both belong on the card.
+    const frags = active.reduce((n, u) => n + u.frags, 0);
+    const smokes = active.reduce((n, u) => n + u.smokes, 0);
+
     element.innerHTML = `
       <header>
         <span class="name">${squad.name}</span>
         <span class="state ${stateClass}">${state}</span>
       </header>
       ${members.map((u) => this.renderOperator(u)).join('')}
+      <div class="stores">
+        <span class="${frags === 0 ? 'empty' : ''}">FRAG &times;${frags}</span>
+        <span class="${smokes === 0 ? 'empty' : ''}">SMOKE &times;${smokes}</span>
+      </div>
     `;
   }
 

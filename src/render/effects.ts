@@ -101,6 +101,10 @@ export class Effects {
         if (visible(effect.at.x, effect.at.y)) {
           this.pushMark(effect.at.x, effect.at.y, effect.height, true);
         }
+      } else if (effect.kind === 'blast') {
+        // Scorch the ground whether or not anyone saw it go off — a crater you
+        // walk up to later is information too.
+        this.pushMark(effect.at.x, effect.at.y, effect.height - 0.3, true);
       }
     }
   }

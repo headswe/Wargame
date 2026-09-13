@@ -33,7 +33,20 @@ export interface ImpactEffect {
   height: number;
 }
 
-export type Effect = ShotEffect | HitEffect | ImpactEffect;
+export interface BlastEffect {
+  kind: 'blast';
+  at: Vec2;
+  height: number;
+  radius: number;
+}
+
+export interface SmokePopEffect {
+  kind: 'smokePop';
+  at: Vec2;
+  height: number;
+}
+
+export type Effect = ShotEffect | HitEffect | ImpactEffect | BlastEffect | SmokePopEffect;
 
 function rangeFactor(d: number, optimal: number, max: number): number {
   if (d <= optimal) return 1;
@@ -90,9 +103,10 @@ export function hitChance(scene: Scene, shooter: Unit, target: Unit): HitBreakdo
   p *= shooter.weaponReady;
   p *= sighting.exposure;
   p *= targetMotionFactor(target);
-  // Foliage does not stop a round, but it does stop you aiming at what is
-  // behind it.
-  p *= 1 - sighting.concealment * 0.55;
+  // Foliage and smoke do not stop a round, but they do stop you aiming at what
+  // is behind them. Near-total concealment leaves firing into it and hoping,
+  // which is the whole reason to spend a canister on a crossing.
+  p *= 1 - sighting.concealment * 0.85;
   if (shooter.posture === Posture.Pinned) p *= 0.2;
 
   return {

@@ -8,6 +8,10 @@ const FOG_COLOUR = 'vec3(0.03, 0.035, 0.045)';
 const EXPLORED = 0.52;
 /** Darkness for tiles nobody has ever seen. */
 const UNSEEN = 0.93;
+/** How far remembered ground is drained of colour. */
+const MEMORY_DRAIN = 0.86;
+/** And how far it is dimmed. Ground you have walked is ground you can still read. */
+const MEMORY_DIM = 0.74;
 
 /**
  * Fog of war as a single textured quad over the map.
@@ -87,7 +91,22 @@ export class FogOfWar {
           `#include <dithering_fragment>
            vec2 fogUv = vec2(vFogWorld.x / fogWorldSize.x, vFogWorld.z / fogWorldSize.y);
            float fogShade = texture2D(fogMap, fogUv).r;
-           gl_FragColor.rgb = mix(gl_FragColor.rgb, ${FOG_COLOUR}, fogShade);`,
+           // Two different things were being asked of one number. Ground you
+           // have walked past and ground nobody has ever seen are not the same
+           // claim, and fading both toward black made most of the map unreadable
+           // — which matters more here than in most games, because the shape of
+           // the ground IS the tactical information.
+           float remembered = clamp(fogShade / ${EXPLORED.toFixed(3)}, 0.0, 1.0);
+           float grey = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+           vec3 recalled = mix(
+             gl_FragColor.rgb,
+             vec3(grey) * ${MEMORY_DIM.toFixed(3)},
+             remembered * ${MEMORY_DRAIN.toFixed(3)}
+           );
+           float hidden = clamp(
+             (fogShade - ${EXPLORED.toFixed(3)}) / ${(UNSEEN - EXPLORED).toFixed(3)}, 0.0, 1.0
+           );
+           gl_FragColor.rgb = mix(recalled, ${FOG_COLOUR}, hidden * ${UNSEEN.toFixed(3)});`,
         );
     };
     material.needsUpdate = true;

@@ -10,6 +10,10 @@ import {
   type PlannedSlot, type Squad, type SquadOrder, assignSlots, planSlots, spreadOffset,
 } from './squads.ts';
 import type { Effect } from './combat.ts';
+import {
+  type InFlight, Ordnance, launch, pickThrower, resetOrdnanceIds, spend, stockOf,
+  updateOrdnance,
+} from './ordnance.ts';
 import { type SimContext, updateSquad, updateUnit } from './ai.ts';
 
 export const MissionState = { InProgress: 0, Won: 1, Lost: 2 } as const;
@@ -44,6 +48,8 @@ export class Sim implements SimContext {
   readonly unitList: Unit[] = [];
   readonly squads: Squad[] = [];
   effects: Effect[] = [];
+  /** Everything in the air or fizzing on the ground right now. */
+  readonly live: InFlight[] = [];
   time = 0;
 
   readonly objective: Vec2;
@@ -91,6 +97,7 @@ export class Sim implements SimContext {
 
   private spawnPlayerSquads(): void {
     resetUnitIds();
+    resetOrdnanceIds();
     let nameIndex = 0;
     this.scene.spawns.teams.forEach((positions, squadIndex) => {
       if (positions.length === 0) return;
@@ -219,11 +226,43 @@ export class Sim implements SimContext {
     return slots;
   }
 
+  /**
+   * Put one where the player pointed, using whoever on the team can make the
+   * throw. Returns false when nobody can — out of range, no angle, or empty
+   * pouches — so the caller can say which.
+   */
+  throwOrdnance(squadId: number, kind: Ordnance, at: Vec2): boolean {
+    const squad = this.squads[squadId];
+    if (!squad) return false;
+    const thrower = pickThrower(this.scene, this.membersOf(squad), kind, at);
+    if (!thrower) return false;
+    spend(thrower, kind);
+    this.live.push(launch(this.scene, thrower, kind, at));
+    return true;
+  }
+
+  /** What the team has left, for the HUD and for deciding whether to offer it. */
+  stock(squadId: number, kind: Ordnance): number {
+    const squad = this.squads[squadId];
+    if (!squad) return 0;
+    return this.membersOf(squad)
+      .filter((u) => u.state === UnitState.Active)
+      .reduce((n, u) => n + stockOf(u, kind), 0);
+  }
+
   update(dt: number): void {
     if (this.missionState !== MissionState.InProgress) return;
 
     this.time += dt;
     this.effects.length = 0;
+
+    // Ordnance resolves before anyone acts, so a man caught by a blast is
+    // already suppressed when he decides what to do about it this tick.
+    updateOrdnance(this, this.live, dt);
+    this.scene.smoke.update(dt);
+    for (const u of this.unitList) {
+      if (u.throwCooldown > 0) u.throwCooldown -= dt;
+    }
 
     for (const squad of this.squads) updateSquad(this, squad);
     for (const u of this.unitList) updateUnit(this, u, dt);

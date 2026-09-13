@@ -11,6 +11,9 @@ import {
 import {
   type Effect, PIN_THRESHOLD, SUPPRESSION_DECAY, UNPIN_THRESHOLD, hitChance, resolveShot,
 } from './combat.ts';
+import {
+  type InFlight, FRAG_RADIUS, Ordnance, canThrow, dangerFrom, launch, spend, stockOf,
+} from './ordnance.ts';
 import type { Squad } from './squads.ts';
 
 export interface SimContext {
@@ -20,6 +23,7 @@ export interface SimContext {
   unitList: Unit[];
   squads: Squad[];
   effects: Effect[];
+  live: InFlight[];
   time: number;
 }
 
@@ -78,7 +82,11 @@ function look(ctx: SimContext, observer: Unit, target: Unit): Look {
     VISION_RANGE,
   );
   return {
-    seen: sighting.visible,
+    // Thick enough and it stops being a matter of how fast you notice him: he
+    // is not there to be noticed. This is what a canister actually buys —
+    // being lost, not merely being harder to see — and it is why smoke is
+    // worth carrying when a hedgerow is only worth walking behind.
+    seen: sighting.visible && sighting.concealment < 0.88,
     exposure: sighting.exposure,
     concealment: sighting.concealment,
     distance: sighting.distance,
@@ -464,6 +472,94 @@ function updateHostileInitiative(ctx: SimContext, u: Unit): void {
   }
 }
 
+/**
+ * Get away from the thing fizzing on the ground.
+ *
+ * This is the other half of what makes a grenade a tactic rather than a
+ * damage roll. Cooking for a second means the defender gets to decide, so the
+ * grenade's real effect is that it moves him — out of the position he was
+ * holding, into the open, at the moment your base of fire is looking at him.
+ * A man who breaks cover and is missed has still been beaten.
+ */
+function avoidBlast(ctx: SimContext, u: Unit): boolean {
+  const danger = dangerFrom(ctx.live, u.faction);
+  if (!danger) {
+    // Nothing live any more: drop back to the tempo the order asked for, or a
+    // man blown out of his position would spend the rest of the fight running
+    // with his weapon down.
+    if (u.moveMode === MoveMode.Sprint && u.diving && !u.slot) {
+      u.diving = false;
+      u.moveMode = ctx.squads[u.squadId]?.order?.mode ?? MoveMode.Tactical;
+    }
+    return false;
+  }
+  const d = dist(u.pos, danger);
+  if (d > FRAG_RADIUS + 1.5) return false;
+  // Already running from this one. Re-solving it twenty times a second buys
+  // nothing and costs an A* each time.
+  if (u.diving && u.slot && dist(u.slot, danger) > FRAG_RADIUS) return true;
+
+  // Straight away from it, as far as the ground allows.
+  const away = normalize(sub(u.pos, danger));
+  for (const reach of [FRAG_RADIUS + 3, FRAG_RADIUS + 1, FRAG_RADIUS - 1]) {
+    for (const turn of [0, 0.5, -0.5, 1.0, -1.0]) {
+      const a = Math.atan2(away.y, away.x) + turn;
+      const p = vec(danger.x + Math.cos(a) * reach, danger.y + Math.sin(a) * reach);
+      if (!ctx.scene.walkable(p.x, p.y)) continue;
+      if (!ctx.scene.findPath(u.pos, p)) continue;
+      u.coverSpot = null;
+      u.slot = p;
+      u.moveMode = MoveMode.Sprint;
+      u.diving = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Hostiles grenade you out of cover, for the same reason you grenade them.
+ *
+ * The trigger is precisely the situation rifle fire cannot solve: someone is
+ * there, he is close, and shooting at him is not working. Leaving this out
+ * would have made every defended position a one-way problem.
+ */
+function considerGrenade(ctx: SimContext, u: Unit): void {
+  if (u.faction !== Faction.Hostile) return;
+  if (u.throwCooldown > 0 || stockOf(u, Ordnance.Frag) <= 0) return;
+  if (u.posture === Posture.Pinned || isMoving(u)) return;
+
+  const throwAt = (at: Vec2): boolean => {
+    const d = dist(u.pos, at);
+    // Not across the field, and not at his own feet.
+    if (d > 24 || d < 6) return false;
+    if (!canThrow(ctx.scene, u, at)) return false;
+    spend(u, Ordnance.Frag);
+    ctx.live.push(launch(ctx.scene, u, Ordnance.Frag, { ...at }));
+    return true;
+  };
+
+  for (const id of u.visible) {
+    const t = ctx.units.get(id);
+    if (!t || t.state !== UnitState.Active) continue;
+    const shot = hitChance(ctx.scene, u, t);
+    // Only when shooting at him is not the answer.
+    if (!shot.blocked && shot.exposure > 0.3) continue;
+    if (throwAt(t.pos)) return;
+  }
+
+  // And at where he went, which is the case that matters most: a man who has
+  // just put a wall between himself and you is not a contact any more, and if
+  // losing sight of him ended the exchange, cover would be an off switch.
+  for (const [id, seen] of u.memory) {
+    if (seen.age > 5) continue;
+    if (u.visible.includes(id)) continue;
+    const t = ctx.units.get(id);
+    if (!t || t.state !== UnitState.Active) continue;
+    if (throwAt(seen.pos)) return;
+  }
+}
+
 export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   if (u.state === UnitState.Dead) return;
   if (u.state === UnitState.Down) {
@@ -479,6 +575,8 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   const target = selectTarget(ctx, u);
   u.targetId = target?.id ?? null;
 
+  const fleeing = avoidBlast(ctx, u);
+  if (!fleeing) considerGrenade(ctx, u);
   updateHostileInitiative(ctx, u);
   ensurePath(ctx, u, dt);
   stepMovement(ctx, u, dt);

@@ -95,6 +95,19 @@ html, body {
 .team.selected { background: rgba(48, 62, 58, 0.92); border-color: #fff; }
 .team.wiped { opacity: 0.45; }
 
+/* What the team has left to solve a problem rifles cannot. */
+.team .stores {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  opacity: 0.82;
+}
+.team .stores .empty { opacity: 0.3; text-decoration: line-through; }
+
 .team header {
   display: flex;
   justify-content: space-between;

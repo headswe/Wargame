@@ -1,4 +1,5 @@
 import { Solidity, Structures } from './geometry.ts';
+import type { SmokeField } from './smoke.ts';
 import type { Terrain } from './terrain.ts';
 
 /** Eye and silhouette heights, in metres above the ground you are standing on. */
@@ -241,6 +242,7 @@ export function sightline(
   viewer: Viewer,
   target: Target,
   maxRange = Infinity,
+  smoke: SmokeField | null = null,
 ): Sighting {
   const dx = target.x - viewer.x;
   const dy = target.y - viewer.y;
@@ -257,6 +259,9 @@ export function sightline(
   let concealment = 0;
 
   const { cols, rows, cellSize, blockTop, coverTop, density } = field;
+  // Nothing burning anywhere on the map costs one branch, not a second lookup
+  // per cell for the whole game.
+  const haze = smoke !== null && smoke.active ? smoke : null;
 
   // Every cell the line crosses, and no others.
   //
@@ -312,8 +317,15 @@ export function sightline(
       // actually travelled inside the cell: a single bush is a nuisance, a
       // hedgerow seen through the long way is total.
       const veg = coverTop[k];
+      const travelled = (Math.min(exit, 1) - entry) * distance;
       if (veg > -Infinity && eyeH + (headH - eyeH) * entry < veg) {
-        concealment += density[k] * ((Math.min(exit, 1) - entry) * distance) / 10;
+        concealment += density[k] * travelled / 10;
+      }
+      // Smoke is the same axis, deliberately: it is the one thing a team can
+      // put on the field to buy the cover the ground refuses to give them, and
+      // it has to be worth exactly what a hedgerow is worth, no more.
+      if (haze !== null && haze.top[k] > -Infinity && eyeH + (headH - eyeH) * entry < haze.top[k]) {
+        concealment += haze.density[k] * travelled / 5.5;
       }
     }
 

@@ -187,6 +187,16 @@ export interface Unit {
   /** Last place we saw each enemy, by id. */
   memory: Map<number, { pos: Vec2; age: number }>;
 
+  // Ordnance
+  /** Fragmentation grenades left. The answer to a position rifles cannot shift. */
+  frags: number;
+  /** Smoke canisters left. The answer to ground rifles cover too well. */
+  smokes: number;
+  /** Seconds before this man will throw another. */
+  throwCooldown: number;
+  /** Breaking cover to get away from a live one, rather than following orders. */
+  diving: boolean;
+
   /** Cosmetic: seconds since last shot, for muzzle flash timing in the renderer. */
   lastShotAt: number;
   /** Throttles A* retries when a slot is briefly unreachable. */
@@ -250,6 +260,10 @@ export function makeUnit(opts: {
     visible: [],
     spotting: new Map(),
     memory: new Map(),
+    frags: opts.role === 'Team Leader' ? 2 : 1,
+    smokes: opts.role === 'Team Leader' ? 2 : 1,
+    throwCooldown: 0,
+    diving: false,
     lastShotAt: 99,
     repathTimer: 0,
   };

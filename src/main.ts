@@ -7,6 +7,8 @@ import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
 import type { Vec2 } from './sim/math.ts';
 import { spreadOffset } from './sim/squads.ts';
+import { Ordnance } from './sim/ordnance.ts';
+import { OrdnanceView } from './render/ordnance.ts';
 
 import { IsoCamera } from './render/camera.ts';
 import { WorldView, buildLighting } from './render/world.ts';
@@ -44,6 +46,7 @@ class Mission {
   private readonly fog: FogOfWar;
   private readonly effects = new Effects();
   private readonly markers: Markers;
+  private readonly ordnanceView: OrdnanceView;
   private readonly hud: Hud;
   private readonly controls: Controls;
 
@@ -64,7 +67,10 @@ class Mission {
 
     this.unitViews = new UnitViews(this.sim);
     this.markers = new Markers(this.sim);
-    this.root.add(this.unitViews.group, this.effects.group, this.markers.group);
+    this.ordnanceView = new OrdnanceView();
+    this.root.add(
+      this.unitViews.group, this.effects.group, this.ordnanceView.group, this.markers.group,
+    );
     scene.add(this.root);
 
     this.hud = new Hud(uiRoot, STEPOVE, this.sim, (id) => this.select([id], false), onRestart);
@@ -93,6 +99,7 @@ class Mission {
         const on = this.markers.toggleCoverOverlay();
         this.hud.alert(on ? 'Cover overlay on' : 'Cover overlay off');
       },
+      onThrow: (kind) => this.throwOrdnance(kind),
     });
 
     // Open looking at the start line, not at the middle of the map.
@@ -144,6 +151,33 @@ class Mission {
     const x = units.reduce((a, u) => a + u.pos.x, 0) / units.length;
     const y = units.reduce((a, u) => a + u.pos.y, 0) / units.length;
     iso.jumpTo(x, y);
+  }
+
+  /**
+   * Put a grenade or a canister where the cursor is.
+   *
+   * Deliberately aimed at the ground rather than at a unit: the interesting
+   * decision is which piece of ground stops being usable, and aiming at a man
+   * would quietly turn a positional weapon into a targeted one.
+   */
+  private throwOrdnance(kind: 'frag' | 'smoke'): void {
+    if (!this.hover || this.selected.size === 0) return;
+    const ordnance = kind === 'frag' ? Ordnance.Frag : Ordnance.Smoke;
+    const label = kind === 'frag' ? 'Frag' : 'Smoke';
+
+    let thrown = 0;
+    let outOfStock = 0;
+    for (const id of this.selected) {
+      if (this.sim.stock(id, ordnance) <= 0) {
+        outOfStock++;
+        continue;
+      }
+      if (this.sim.throwOrdnance(id, ordnance, this.hover)) thrown++;
+    }
+
+    if (thrown > 0) this.hud.alert(`${label} out`, 'info');
+    else if (outOfStock === this.selected.size) this.hud.alert(`No ${label.toLowerCase()} left`, 'danger');
+    else this.hud.alert(`${label}: too far, or no angle from there`, 'danger');
   }
 
   private order(dest: Vec2, sprint: boolean, facing: number | null): void {
@@ -233,6 +267,7 @@ class Mission {
     this.unitViews.update(this.sim, dt, this.selected, iso.camera.quaternion);
     this.fog.update(this.sim, dt);
     this.effects.update(dt);
+    this.ordnanceView.update(this.sim, dt, this.sim.time);
     this.markers.update(this.sim, this.selected, dt);
     this.hud.update(this.sim, this.selected, dt);
   }
@@ -270,6 +305,8 @@ declare global {
       worldToScreen(x: number, y: number): { x: number; y: number };
       snapshot(): unknown;
       lookAt(x: number, y: number): void;
+      tryThrow(squadId: number, kind: number, x: number, y: number): boolean;
+      ordnance(): { kind: number; landed: boolean; fuse: number }[];
     };
   }
 }
@@ -285,6 +322,14 @@ window.wargame = {
   },
   lookAt(x, y) {
     iso.jumpTo(x, y);
+  },
+  tryThrow(squadId, kind, x, y) {
+    return mission.sim.throwOrdnance(squadId, kind as Ordnance, { x, y });
+  },
+  ordnance() {
+    return mission.sim.live.map((o) => ({
+      kind: o.kind, landed: o.landed, fuse: Number(o.fuse.toFixed(2)),
+    }));
   },
   snapshot() {
     const sim = mission.sim;

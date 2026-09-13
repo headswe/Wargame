@@ -2,6 +2,7 @@ import type { Vec2 } from '../math.ts';
 import { type Navigation, buildNavigation, rebuildNavigation } from '../nav/build.ts';
 import { Solidity, Structures } from './geometry.ts';
 import { OcclusionField, type Sighting, type Target, type Viewer, sightline } from './occlusion.ts';
+import { SmokeField } from './smoke.ts';
 import { Terrain } from './terrain.ts';
 
 export interface Spawns {
@@ -23,6 +24,7 @@ export class Scene {
   readonly terrain: Terrain;
   readonly structures: Structures;
   readonly occlusion: OcclusionField;
+  readonly smoke: SmokeField;
   navigation: Navigation;
   readonly spawns: Spawns = { teams: [[], [], []], enemies: [], objectives: [] };
 
@@ -36,6 +38,7 @@ export class Scene {
     this.terrain = new Terrain(width, height, 0.5);
     this.structures = new Structures(width, height);
     this.occlusion = new OcclusionField(width, height, 0.5);
+    this.smoke = new SmokeField(width, height, 0.5);
     this.navigation = { field: null as never, mesh: null as never };
   }
 
@@ -66,7 +69,18 @@ export class Scene {
   }
 
   sight(viewer: Viewer, target: Target, maxRange?: number): Sighting {
-    return sightline(this.terrain, this.occlusion, viewer, target, maxRange);
+    return sightline(this.terrain, this.occlusion, viewer, target, maxRange, this.smoke);
+  }
+
+  /**
+   * The same question with the smoke taken away.
+   *
+   * Cover planning has to ignore smoke: a team told to hold ground behind a
+   * canister would settle there, and then be standing in the open when it
+   * thinned. Smoke is for crossing, not for holding.
+   */
+  sightThroughSmoke(viewer: Viewer, target: Target, maxRange?: number): Sighting {
+    return sightline(this.terrain, this.occlusion, viewer, target, maxRange, null);
   }
 
   /**
@@ -214,13 +228,13 @@ export class Scene {
     let exposure = 0;
     let canFire = false;
     for (const from of arc) {
-      exposure += this.sight(
+      exposure += this.sightThroughSmoke(
         { x: from.x, y: from.y, eye: 1.62 },
         { x: pos.x, y: pos.y, base: 0, top: crouchTop },
       ).exposure;
       // Cover you cannot shoot out of is a hiding place, not a position.
       if (!canFire) {
-        canFire = this.sight(
+        canFire = this.sightThroughSmoke(
           { x: pos.x, y: pos.y, eye },
           { x: from.x, y: from.y, base: 0, top: 1.78 },
         ).visible;
