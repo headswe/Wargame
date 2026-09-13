@@ -43,7 +43,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      # enablement turns Pages on via the API if it is not already on, so the
+      # first successful run sets the site up rather than failing on a missing
+      # one. Needs the pages: write permission declared above.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
