@@ -155,6 +155,49 @@ lets a hedgerow run at 23 degrees instead of snapping to the compass, and it is
 deliberately the shape the world wants to become — vector geometry rasterised
 for the simulation.
 
+## The new world model (built, not yet wired in)
+
+`src/sim/world/` and `src/sim/nav/` are the foundation the game is moving onto.
+They are tested and benchmarked but not yet driving the playable build, so the
+grid game above still runs while this is finished.
+
+**Terrain is a heightfield.** Elevation is what lets ground do tactical work:
+dead ground you can cross unseen, a reverse slope a defender sits behind, and a
+ditch you are genuinely *below* rather than beside. Roads and ditches are
+operations on the surface rather than objects placed on it — a road flattens
+across its width while still riding over the hill it crosses, a ditch cuts down,
+a crater deforms and throws up a lip.
+
+**Structures are vectors.** Wall runs at any angle, with a fabric, hit points,
+and a `sill`/`top` pair so one type expresses a full wall, a waist-high
+revetment and a window band. Props add the category the grid could not: bushes
+are *concealment*, not cover — they hide you without stopping anything.
+
+**Navigation is a Recast-style navmesh.** Voxelise walkability from slope and
+obstacles, distance-transform and erode by the agent radius, trace contours off
+the cell boundaries, simplify, triangulate with holes, then A* across cells and
+pull the corridor taut with the funnel algorithm. Because the world is
+single-storey there is exactly one walkable surface per column, which removes
+Recast's span-merging stage entirely.
+
+On a 170 x 130 m village with seven angled buildings:
+
+```
+navmesh                943 triangles from 680 x 520 cells
+path query             0.127 ms          (mean 1.38x straight-line)
+rebuild after a breach ~12 ms steady state
+```
+
+Two things in there are load-bearing and easy to get wrong:
+
+- The erosion radius includes the contour simplification tolerance. Douglas-
+  Peucker moves vertices outward as readily as inward, so without that margin a
+  simplified contour bulges into cleared space and a funnelled path cuts the
+  corner through a wall.
+- Clearance is capped at the erosion radius, which is what makes a regional
+  rebuild exact rather than approximate: a change cannot alter any distance
+  further away than the cap.
+
 ## What is deliberately not here yet
 
 - **The PMC layer** — contracts, payroll, gear, a persistent roster. This is
