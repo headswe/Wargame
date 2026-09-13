@@ -14,6 +14,11 @@ Every push to the default branch runs the simulation tests and, if they pass,
 deploys. The build uses a relative `base`, so it works from the project subpath
 GitHub Pages serves from without hardcoding the repository name.
 
+**One-time setup:** Pages must be switched on under *Settings → Pages → Source:
+GitHub Actions* before the first deploy can succeed. The workflow cannot do this
+for you — the default `GITHUB_TOKEN` is allowed to deploy to Pages but not to
+create the site.
+
 ## Running it
 
 ```bash
