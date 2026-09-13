@@ -46,45 +46,63 @@ async function order(squadKey, wx, wy, { sprint = false, face = null } = {}) {
   }
 }
 
-// 1. Select ALPHA and send it to the west breach with a facing drag.
-await order('1', 10, 30, { face: -Math.PI / 2 });
+// 1. Select ALPHA and send it west along the start line with a facing drag.
+await order('1', 40, 112, { face: -Math.PI / 2 });
 await page.waitForTimeout(500);
 let s = await snap();
 console.log('after ALPHA order  :', squad(s, 0).map(u => `${u.name} path=${u.pathLength} slot=${u.hasSlot} cover=${u.inCover}`).join(' | '));
 
-// 2. BRAVO takes the wall as the base of fire.
-await order('2', 30, 29, { face: -Math.PI / 2 });
+// 2. BRAVO takes the middle as the base of fire.
+await order('2', 86, 112, { face: -Math.PI / 2 });
 await page.waitForTimeout(400);
 
-// 3. CHARLIE sprints for the east breach — double right-click.
-await order('3', 46, 30, { sprint: true });
+// 3. CHARLIE sprints for the eastern flank — double right-click.
+await order('3', 130, 112, { sprint: true });
 await page.waitForTimeout(600);
 s = await snap();
 const charlie = squad(s, 2);
 console.log('after CHARLIE sprint:', charlie.map(u => `${u.name} mode=${u.mode} path=${u.pathLength}`).join(' | '));
 console.log('sprint registered  :', charlie.some(u => u.mode === 1));
 
-await page.screenshot({ path: `${OUT}/02-orders.png` });
+// The cursor preview: hover a team over the ditch and photograph what the
+// player is being told before he commits.
+await page.keyboard.press('1');
+const overDitch = await at(40, 82);
+await page.mouse.move(overDitch.x, overDitch.y, { steps: 8 });
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${OUT}/02-preview.png` });
+
+// 4. Into the ditch, which the navmesh has to actually let them enter.
+await order('1', 40, 82);
+await order('2', 86, 95);
+await order('3', 130, 82);
+await page.waitForTimeout(4000);
+s = await snap();
+const inDitch = squad(s, 0).filter(u => Math.abs(u.y - 82) < 4).length;
+console.log(`ALPHA in the ditch : ${inDitch}/4`);
+await page.screenshot({ path: `${OUT}/03-ditch.png` });
 
 // Let the assault run.
-await order('1', 11, 19, { face: -Math.PI / 2 });
-await order('3', 45, 19, { face: -Math.PI / 2 });
-await page.waitForTimeout(9000);
+await order('1', 34, 60, { face: -Math.PI / 2 });
+await order('2', 86, 72, { face: -Math.PI / 2 });
+await order('3', 138, 60, { face: -Math.PI / 2 });
+await page.waitForTimeout(12000);
 s = await snap();
 const players = s.units.filter(u => u.faction === 0);
 const hostiles = s.units.filter(u => u.faction === 1);
 console.log(`t=${s.time}s  standing ${players.filter(u=>u.state===0).length}/12  hostiles ${hostiles.filter(u=>u.state===0).length}/10  contacts ${players.reduce((a,u)=>a+u.visible,0)}`);
 console.log('suppressed operators:', players.filter(u => u.suppression > 0.3).map(u => `${u.name} ${u.suppression}`).join(', ') || 'none');
-await page.screenshot({ path: `${OUT}/03-firefight.png` });
+console.log('posted in cover    :', players.filter(u => u.inCover).length + '/12');
+await page.screenshot({ path: `${OUT}/04-firefight.png` });
 
-// Zoom in for a close read of cover pips and posture.
+// Zoom in for a close read of posture and the post markers.
 await page.keyboard.press('1');
 await page.keyboard.press(' ');
 for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -120);
-const hover = await at(12, 16);
-await page.mouse.move(hover.x, hover.y);
+const hover = await at(36, 56);
+await page.mouse.move(hover.x, hover.y, { steps: 6 });
 await page.waitForTimeout(900);
-await page.screenshot({ path: `${OUT}/04-close.png` });
+await page.screenshot({ path: `${OUT}/05-close.png` });
 
 console.log('console errors:', errors.length ? errors.slice(0, 6) : 'none');
 await browser.close();

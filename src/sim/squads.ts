@@ -73,6 +73,22 @@ function formationSlot(scene: Scene, dest: Vec2, threatDir: Vec2, index: number)
   return { ...dest };
 }
 
+/** One operator's share of an order: where he goes and what it costs him. */
+export interface PlannedSlot {
+  unitId: number;
+  pos: Vec2;
+  /** 0..1 of him that would show from the direction the trouble is in. */
+  exposure: number;
+  /** Whether he could fight from there, or would only be hidden. */
+  canFire: boolean;
+  facing: number;
+}
+
+export interface SquadPlan {
+  threatDir: Vec2;
+  slots: PlannedSlot[];
+}
+
 /**
  * Turn one squad-level order into one fighting position per operator.
  *
@@ -81,37 +97,44 @@ function formationSlot(scene: Scene, dest: Vec2, threatDir: Vec2, index: number)
  * there, and can I shoot back from here — so a ditch, a reverse slope and a
  * garden wall all compete on the same terms without any of them being a
  * special case.
+ *
+ * Nothing here touches a unit, so the same call answers "where would they go"
+ * for the cursor preview as answers "where do they go" for the order itself.
+ * The player therefore sees the plan he is about to buy, rather than a guess
+ * at it.
  */
-export function assignSlots(
+export function planSlots(
   scene: Scene,
   squad: Squad,
   units: Map<number, Unit>,
   order: SquadOrder,
-): void {
+): SquadPlan {
   const members = squad.memberIds
     .map((id) => units.get(id))
     .filter((u): u is Unit => !!u && u.state === UnitState.Active);
-  if (members.length === 0) return;
-
   const threatDir = resolveThreatDir(squad, order, members);
-  squad.threatDir = threatDir;
-
-  for (const u of members) u.coverSpot = null;
-
-  if (order.mode === MoveMode.Sprint) {
-    // Speed is the entire point of a sprint. A team that stops to admire a
-    // wall halfway across open ground dies there.
-    members.forEach((u, i) => {
-      u.slot = formationSlot(scene, order.dest, threatDir, i);
-      u.postFacing = order.facing;
-    });
-    return;
-  }
+  if (members.length === 0) return { threatDir, slots: [] };
 
   const threatPoint = vec(
     order.dest.x + threatDir.x * THREAT_DISTANCE,
     order.dest.y + threatDir.y * THREAT_DISTANCE,
   );
+  const facing = order.facing ?? angleOf(threatDir);
+
+  if (order.mode === MoveMode.Sprint) {
+    // Speed is the entire point of a sprint. A team that stops to admire a
+    // wall halfway across open ground dies there. The exposure is still
+    // measured, because that is exactly what the player needs to know before
+    // ordering one.
+    return {
+      threatDir,
+      slots: members.map((u, i) => {
+        const pos = formationSlot(scene, order.dest, threatDir, i);
+        return { unitId: u.id, pos, facing: order.facing ?? facing, ...measure(scene, pos, order.dest, threatPoint) };
+      }),
+    };
+  }
+
   const candidates = scene.findCover(order.dest, COVER_SEARCH_RADIUS, threatPoint, {
     crouchTop: Stature.crouchedTop,
     eye: Stature.crouchedEye,
@@ -121,21 +144,63 @@ export function assignSlots(
   // decides where the squad can suppress from, and the rest works around it.
   const ordered = [...members].sort((a, b) => rolePriority(b) - rolePriority(a));
   const taken: Vec2[] = [];
+  const slots: PlannedSlot[] = [];
   let formationIndex = 0;
 
   for (const u of ordered) {
-    const pick = candidates.find(
-      (c) => !taken.some((t) => dist(t, c.pos) < MIN_SPACING),
-    );
+    const pick = candidates.find((c) => !taken.some((t) => dist(t, c.pos) < MIN_SPACING));
     if (pick) {
-      u.slot = { ...pick.pos };
       taken.push(pick.pos);
+      slots.push({
+        unitId: u.id, pos: { ...pick.pos }, facing,
+        exposure: pick.exposure, canFire: pick.canFire,
+      });
     } else {
-      u.slot = formationSlot(scene, order.dest, threatDir, formationIndex++);
-      taken.push(u.slot);
+      const pos = formationSlot(scene, order.dest, threatDir, formationIndex++);
+      taken.push(pos);
+      slots.push({ unitId: u.id, pos, facing, ...measure(scene, pos, order.dest, threatPoint) });
     }
-    u.postFacing = order.facing ?? angleOf(threatDir);
   }
+  return { threatDir, slots };
+}
+
+/** Apply a plan. The only thing in here that writes to a unit. */
+export function assignSlots(
+  scene: Scene,
+  squad: Squad,
+  units: Map<number, Unit>,
+  order: SquadOrder,
+): void {
+  const plan = planSlots(scene, squad, units, order);
+  squad.threatDir = plan.threatDir;
+
+  for (const slot of plan.slots) {
+    const u = units.get(slot.unitId);
+    if (!u) continue;
+    u.coverSpot = null;
+    u.slot = { ...slot.pos };
+    u.postFacing = order.mode === MoveMode.Sprint ? order.facing : slot.facing;
+  }
+}
+
+/** What a given patch of ground costs an operator who stands on it. */
+function measure(scene: Scene, pos: Vec2, around: Vec2, threat: Vec2) {
+  return scene.stance(
+    pos, scene.threatArc(around, threat), Stature.crouchedTop, Stature.crouchedEye,
+  );
+}
+
+/**
+ * Fan multiple selected teams out so one order does not stack them.
+ *
+ * It lives beside the planner because the cursor preview has to offset teams
+ * exactly the way the order will, or it shows the player the wrong plan.
+ */
+export function spreadOffset(index: number, total: number): Vec2 {
+  if (total <= 1) return vec(0, 0);
+  const angle = (index / total) * Math.PI * 2;
+  const radius = 2.2;
+  return vec(Math.cos(angle) * radius, Math.sin(angle) * radius);
 }
 
 function rolePriority(u: Unit): number {

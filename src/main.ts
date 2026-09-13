@@ -6,6 +6,7 @@ import { STEPOVE } from './sim/levels.ts';
 import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
 import type { Vec2 } from './sim/math.ts';
+import { spreadOffset } from './sim/squads.ts';
 
 import { IsoCamera } from './render/camera.ts';
 import { WorldView, buildLighting } from './render/world.ts';
@@ -152,7 +153,7 @@ class Mission {
 
     // Spread multiple teams around the order point instead of stacking them.
     ids.forEach((id, i) => {
-      const offset = ids.length === 1 ? { x: 0, y: 0 } : spreadOffset(i, ids.length);
+      const offset = spreadOffset(i, ids.length);
       this.sim.orderSquad(id, { x: dest.x + offset.x, y: dest.y + offset.y }, mode, facing);
     });
 
@@ -239,13 +240,6 @@ class Mission {
   private accumulator = 0;
 }
 
-/** Fan multiple selected teams out so one order does not stack them. */
-function spreadOffset(index: number, total: number): Vec2 {
-  const angle = (index / total) * Math.PI * 2;
-  const radius = 2.2;
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
-}
-
 let mission: Mission;
 
 function startMission(seed: number): void {
@@ -275,6 +269,7 @@ declare global {
     wargame?: {
       worldToScreen(x: number, y: number): { x: number; y: number };
       snapshot(): unknown;
+      lookAt(x: number, y: number): void;
     };
   }
 }
@@ -287,6 +282,9 @@ window.wargame = {
       x: (projected.x * 0.5 + 0.5) * rect.width + rect.left,
       y: (-projected.y * 0.5 + 0.5) * rect.height + rect.top,
     };
+  },
+  lookAt(x, y) {
+    iso.jumpTo(x, y);
   },
   snapshot() {
     const sim = mission.sim;

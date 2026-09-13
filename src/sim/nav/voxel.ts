@@ -18,6 +18,19 @@ export interface VoxelOptions {
    * simplification error eats into slack rather than into real clearance.
    */
   contourTolerance: number;
+  /**
+   * How far across a too-steep band an operator will scramble, in metres.
+   *
+   * A slope threshold alone cannot tell a hillside from a ditch bank, and they
+   * are not the same thing: nobody walks up a forty-degree hill, and everybody
+   * slides into a drainage ditch. The difference is width. A steep band no
+   * wider than this, with walkable ground on both sides, is crossed rather
+   * than skirted — which is what makes trenches, sunken roads and embankments
+   * usable terrain instead of fences.
+   */
+  scrambleRun: number;
+  /** Height an operator will scramble up or down across such a band. */
+  scrambleRise: number;
 }
 
 export const DEFAULT_VOXEL_OPTIONS: VoxelOptions = {
@@ -25,6 +38,8 @@ export const DEFAULT_VOXEL_OPTIONS: VoxelOptions = {
   maxSlope: 0.8,
   agentRadius: 0.35,
   contourTolerance: 0.2,
+  scrambleRun: 3.2,
+  scrambleRise: 2.4,
 };
 
 /**
@@ -46,15 +61,28 @@ export class WalkableField {
   readonly clearance: Float32Array;
   private readonly raw: Uint8Array;
   private readonly options: VoxelOptions;
+  /** Ground walkability before structures, over the working box. */
+  private readonly ground: Uint8Array;
+  /** Ground refused on slope alone, which is what a scramble may reinstate. */
+  private readonly steep: Uint8Array;
+  /** Terrain height per cell, kept so a scramble can be tested for rise. */
+  private readonly elevation: Float32Array;
+  /** Cells the scramble pass reinstates. Written by both passes, applied once. */
+  private readonly bridged: Uint8Array;
 
   constructor(width: number, height: number, options: VoxelOptions) {
     this.options = options;
     this.cellSize = options.cellSize;
     this.cols = Math.ceil(width / options.cellSize);
     this.rows = Math.ceil(height / options.cellSize);
-    this.raw = new Uint8Array(this.cols * this.rows);
-    this.walkable = new Uint8Array(this.cols * this.rows);
-    this.clearance = new Float32Array(this.cols * this.rows);
+    const cells = this.cols * this.rows;
+    this.raw = new Uint8Array(cells);
+    this.walkable = new Uint8Array(cells);
+    this.clearance = new Float32Array(cells);
+    this.ground = new Uint8Array(cells);
+    this.steep = new Uint8Array(cells);
+    this.elevation = new Float32Array(cells);
+    this.bridged = new Uint8Array(cells);
   }
 
   centreOf(i: number, j: number): { x: number; y: number } {
@@ -108,12 +136,15 @@ export class WalkableField {
     maxY: number,
   ): boolean {
     const cap = this.clearanceCap;
-    const i0 = Math.floor(minX / this.cellSize);
-    const j0 = Math.floor(minY / this.cellSize);
-    const i1 = Math.ceil(maxX / this.cellSize);
-    const j1 = Math.ceil(maxY / this.cellSize);
+    // A change can widen or close a steep band, so every band it touches has to
+    // be re-decided in full, not just the part inside the dirty box.
+    const reach = this.scrambleCells + 1;
+    const i0 = Math.floor(minX / this.cellSize) - reach;
+    const j0 = Math.floor(minY / this.cellSize) - reach;
+    const i1 = Math.ceil(maxX / this.cellSize) + reach;
+    const j1 = Math.ceil(maxY / this.cellSize) + reach;
 
-    this.rasterise(terrain, structures, i0 - 1, j0 - 1, i1 + 1, j1 + 1);
+    this.rasterise(terrain, structures, i0, j0, i1, j1);
     this.computeClearance(i0 - cap, j0 - cap, i1 + cap, j1 + cap);
     return this.erode(i0 - cap, j0 - cap, i1 + cap, j1 + cap);
   }
@@ -129,13 +160,36 @@ export class WalkableField {
     const lo = { i: Math.max(0, i0), j: Math.max(0, j0) };
     const hi = { i: Math.min(this.cols - 1, i1), j: Math.min(this.rows - 1, j1) };
 
+    // The scramble pass needs to see a whole steep band plus the walkable cell
+    // at either end of it, so the ground is sampled over a margin and only the
+    // requested box is written back. That keeps a regional redo exact.
+    const margin = this.scrambleCells + 1;
+    const el = { i: Math.max(0, lo.i - margin), j: Math.max(0, lo.j - margin) };
+    const eh = {
+      i: Math.min(this.cols - 1, hi.i + margin),
+      j: Math.min(this.rows - 1, hi.j + margin),
+    };
+
     // Ground first: too steep is not walkable, whatever is or is not built on it.
+    for (let j = el.j; j <= eh.j; j++) {
+      for (let i = el.i; i <= eh.i; i++) {
+        const { x, y } = this.centreOf(i, j);
+        const k = j * this.cols + i;
+        const inside = x > 0 && y > 0 && x < terrain.width && y < terrain.height;
+        const walks = inside && terrain.slopeAt(x, y) <= this.options.maxSlope;
+        this.ground[k] = walks ? 1 : 0;
+        this.steep[k] = inside && !walks ? 1 : 0;
+        this.elevation[k] = inside ? terrain.heightAt(x, y) : 0;
+        this.bridged[k] = 0;
+      }
+    }
+
+    this.scramble(el, eh);
+
     for (let j = lo.j; j <= hi.j; j++) {
       for (let i = lo.i; i <= hi.i; i++) {
-        const { x, y } = this.centreOf(i, j);
-        const inside = x > 0 && y > 0 && x < terrain.width && y < terrain.height;
-        this.raw[j * this.cols + i] =
-          inside && terrain.slopeAt(x, y) <= this.options.maxSlope ? 1 : 0;
+        const k = j * this.cols + i;
+        this.raw[k] = this.ground[k] === 1 || this.bridged[k] === 1 ? 1 : 0;
       }
     }
 
@@ -147,16 +201,75 @@ export class WalkableField {
     const maxX = (hi.i + 1) * this.cellSize;
     const maxY = (hi.j + 1) * this.cellSize;
 
+    // Same clamp as the occlusion field, for the same reason: centre sampling
+    // drops anything thinner than a cell, and a fence you can walk through is
+    // no fence. Erosion by the agent radius dwarfs the correction anyway.
+    const floor = this.cellSize * Math.SQRT1_2;
+
     for (const id of structures.segmentsInBox(minX, minY, maxX, maxY)) {
       const segment = structures.segments[id];
       if (segment.destroyed || segment.solidity === Solidity.Concealment) continue;
-      this.stampSegment(segment.a, segment.b, segment.thickness / 2, lo, hi);
+      this.stampSegment(segment.a, segment.b, Math.max(segment.thickness / 2, floor), lo, hi);
     }
 
     for (const id of structures.propsInBox(minX, minY, maxX, maxY)) {
       const prop = structures.props[id];
       if (prop.destroyed || prop.solidity === Solidity.Concealment) continue;
-      this.stampCircle(prop.pos, prop.radius, lo, hi);
+      this.stampCircle(prop.pos, Math.max(prop.radius, floor), lo, hi);
+    }
+  }
+
+  /** Width of the widest band an operator will cross, in cells. */
+  private get scrambleCells(): number {
+    return Math.max(1, Math.round(this.options.scrambleRun / this.cellSize));
+  }
+
+  /**
+   * Reinstate narrow steep bands that have footing on both sides.
+   *
+   * Rows and columns are scanned independently and both write into the same
+   * mask, which is applied afterwards — so a band only ever counts as narrow
+   * because of the ground the slope test actually allowed, never because the
+   * other pass just widened it. A ditch is narrow across and long along, so
+   * one pass catches it and the other correctly declines to.
+   */
+  private scramble(lo: { i: number; j: number }, hi: { i: number; j: number }): void {
+    const { cols, steep, ground, elevation, bridged } = this;
+    const maxRun = this.scrambleCells;
+    const maxRise = this.options.scrambleRise;
+
+    const span = (start: number, end: number, stride: number, base: number): void => {
+      // `start`..`end` is the run of steep cells; the two cells flanking it are
+      // the footing the operator leaves from and arrives on.
+      if (end - start > maxRun) return;
+      const before = base + (start - 1) * stride;
+      const after = base + (end + 1) * stride;
+      if (ground[before] !== 1 || ground[after] !== 1) return;
+      if (Math.abs(elevation[after] - elevation[before]) > maxRise) return;
+      for (let k = start; k <= end; k++) bridged[base + k * stride] = 1;
+    };
+
+    for (let j = lo.j; j <= hi.j; j++) {
+      const base = j * cols;
+      let i = lo.i + 1;
+      while (i < hi.i) {
+        if (steep[base + i] !== 1) { i++; continue; }
+        let end = i;
+        while (end + 1 < hi.i && steep[base + end + 1] === 1) end++;
+        span(i, end, 1, base);
+        i = end + 1;
+      }
+    }
+
+    for (let i = lo.i; i <= hi.i; i++) {
+      let j = lo.j + 1;
+      while (j < hi.j) {
+        if (steep[j * cols + i] !== 1) { j++; continue; }
+        let end = j;
+        while (end + 1 < hi.j && steep[(end + 1) * cols + i] === 1) end++;
+        span(j, end, cols, i);
+        j = end + 1;
+      }
     }
   }
 

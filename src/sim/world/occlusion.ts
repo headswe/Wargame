@@ -114,7 +114,15 @@ export class OcclusionField {
     segment: Structures['segments'][number],
     bi0: number, bj0: number, bi1: number, bj1: number,
   ): void {
-    const half = segment.thickness / 2;
+    // A cell is claimed by whether its centre falls inside the wall, so a wall
+    // thinner than a cell lands between centres and rasterises to nothing at
+    // all — a garden wall or a fence that stops no bullet and hides nobody.
+    // Widening the stamp to the cell's half-diagonal guarantees that every cell
+    // the wall passes through is claimed. It costs a few centimetres of
+    // thickness on the thinnest geometry, which is the right way round: a wall
+    // slightly fatter than drawn is invisible to the player, a wall that isn't
+    // there is a hole in the map.
+    const half = Math.max(segment.thickness / 2, this.cellSize * Math.SQRT1_2);
     const i0 = Math.max(bi0, Math.floor((Math.min(segment.a.x, segment.b.x) - half) / this.cellSize));
     const i1 = Math.min(bi1, Math.ceil((Math.max(segment.a.x, segment.b.x) + half) / this.cellSize));
     const j0 = Math.max(bj0, Math.floor((Math.min(segment.a.y, segment.b.y) - half) / this.cellSize));
@@ -152,6 +160,8 @@ export class OcclusionField {
     prop: Structures['props'][number],
     bi0: number, bj0: number, bi1: number, bj1: number,
   ): void {
+    // No clamp for props, unlike walls: something narrower than the grid is a
+    // post or a bollard, and you can see past one.
     const i0 = Math.max(bi0, Math.floor((prop.pos.x - prop.radius) / this.cellSize));
     const i1 = Math.min(bi1, Math.ceil((prop.pos.x + prop.radius) / this.cellSize));
     const j0 = Math.max(bj0, Math.floor((prop.pos.y - prop.radius) / this.cellSize));
@@ -243,43 +253,79 @@ export function sightline(
   const footH = groundAtTarget + target.base;
   const headH = groundAtTarget + target.top;
 
-  // Coarser steps over long lines: 160 samples resolves anything thicker than
-  // half a metre at any range this game fights at, and caps the cost per query.
-  const step = Math.min(0.6, Math.max(field.cellSize, distance / 160));
-  const steps = Math.max(2, Math.ceil(distance / step));
-
   let waterline = footH;
   let concealment = 0;
 
   const { cols, rows, cellSize, blockTop, coverTop, density } = field;
 
-  for (let s = 1; s < steps; s++) {
-    const t = s / steps;
-    const x = viewer.x + dx * t;
-    const y = viewer.y + dy * t;
+  // Every cell the line crosses, and no others.
+  //
+  // Sampling at a fixed stride does not work here however fine the stride: a
+  // cell is entered for as little as a hair's breadth where the line clips its
+  // corner, so any stride at all will eventually step over a wall and report a
+  // clear shot straight through a building. Walking the grid instead (the
+  // standard Amanatides-Woo traversal) removes the failure mode rather than
+  // making it rarer, and costs less on short lines into the bargain.
+  let i = Math.floor(viewer.x / cellSize);
+  let j = Math.floor(viewer.y / cellSize);
+  const iEnd = Math.floor(target.x / cellSize);
+  const jEnd = Math.floor(target.y / cellSize);
+  const stepI = dx >= 0 ? 1 : -1;
+  const stepJ = dy >= 0 ? 1 : -1;
+  const invX = dx === 0 ? Infinity : 1 / Math.abs(dx);
+  const invY = dy === 0 ? Infinity : 1 / Math.abs(dy);
+  // All parameters are fractions of the whole line, so `t` plugs straight into
+  // the waterline equation.
+  const spanX = cellSize * invX;
+  const spanY = cellSize * invY;
+  let nextX = dx === 0 ? Infinity
+    : (dx > 0 ? (i + 1) * cellSize - viewer.x : viewer.x - i * cellSize) * invX;
+  let nextY = dy === 0 ? Infinity
+    : (dy > 0 ? (j + 1) * cellSize - viewer.y : viewer.y - j * cellSize) * invY;
 
-    const i = Math.floor(x / cellSize);
-    const j = Math.floor(y / cellSize);
-    if (i < 0 || j < 0 || i >= cols || j >= rows) continue;
-    const k = j * cols + i;
-    const obstruction = blockTop[k];
+  let entry = 0;
+  // A line cannot cross more cells than the grid is wide plus tall.
+  let guard = cols + rows + 4;
 
-    if (obstruction > eyeH || obstruction > eyeH + (waterline - eyeH) * t) {
-      const needed = eyeH + (obstruction - eyeH) / t;
-      if (needed > waterline) {
-        waterline = needed;
-        if (waterline >= headH) return { visible: false, exposure: 0, concealment, distance };
+  while (guard-- > 0) {
+    const exit = nextX < nextY ? nextX : nextY;
+
+    // The viewer's own cell never blocks — you can always see out of where you
+    // are standing — and neither does the target's, or a man pressed against a
+    // wall would be hidden by it from every direction at once.
+    if (entry > 0 && !(i === iEnd && j === jEnd) && i >= 0 && j >= 0 && i < cols && j < rows) {
+      const k = j * cols + i;
+      const obstruction = blockTop[k];
+
+      // An obstruction constrains hardest at the earliest point it occupies, so
+      // the cell is charged at the parameter where the line entered it.
+      if (obstruction > eyeH || obstruction > eyeH + (waterline - eyeH) * entry) {
+        const needed = eyeH + (obstruction - eyeH) / entry;
+        if (needed > waterline) {
+          waterline = needed;
+          if (waterline >= headH) return { visible: false, exposure: 0, concealment, distance };
+        }
+      }
+
+      // Vegetation on the line hides without protecting, so it is accumulated
+      // separately and never touches the exposure figure. Charged by the length
+      // actually travelled inside the cell: a single bush is a nuisance, a
+      // hedgerow seen through the long way is total.
+      const veg = coverTop[k];
+      if (veg > -Infinity && eyeH + (headH - eyeH) * entry < veg) {
+        concealment += density[k] * ((Math.min(exit, 1) - entry) * distance) / 10;
       }
     }
 
-    // Vegetation on the line hides without protecting, so it is accumulated
-    // separately and never touches the exposure figure. Integrates to
-    // depth * density / 10 regardless of step size: a single bush is a
-    // nuisance, a hedgerow seen through the long way is total.
-    const veg = coverTop[k];
-    if (veg > -Infinity && eyeH + (headH - eyeH) * t < veg) {
-      concealment += density[k] * (step / 10);
+    if ((i === iEnd && j === jEnd) || exit >= 1) break;
+    if (nextX < nextY) {
+      i += stepI;
+      nextX += spanX;
+    } else {
+      j += stepJ;
+      nextY += spanY;
     }
+    entry = exit;
   }
 
   const span = headH - footH;

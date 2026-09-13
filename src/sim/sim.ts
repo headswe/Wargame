@@ -6,7 +6,9 @@ import { Stature } from './world/occlusion.ts';
 import {
   Faction, MoveMode, UnitState, WEAPONS, type Role, type Unit, makeUnit, resetUnitIds,
 } from './units.ts';
-import { type Squad, type SquadOrder, assignSlots } from './squads.ts';
+import {
+  type PlannedSlot, type Squad, type SquadOrder, assignSlots, planSlots, spreadOffset,
+} from './squads.ts';
 import type { Effect } from './combat.ts';
 import { type SimContext, updateSquad, updateUnit } from './ai.ts';
 
@@ -187,6 +189,34 @@ export class Sim implements SimContext {
       u.pathIndex = 0;
     }
     assignSlots(this.scene, squad, this.units, order);
+  }
+
+  /**
+   * What that order would actually do, without doing it.
+   *
+   * The cursor needs to show the ground the teams would end up holding, and
+   * the only way for that to stay honest is for it to be the same computation
+   * the order runs — spread offsets included.
+   */
+  previewOrder(
+    squadIds: Iterable<number>,
+    dest: Vec2,
+    mode: MoveMode,
+    facing: number | null,
+  ): PlannedSlot[] {
+    const ids = [...squadIds];
+    const slots: PlannedSlot[] = [];
+    ids.forEach((id, i) => {
+      const squad = this.squads[id];
+      if (!squad || squad.faction !== Faction.Player) return;
+      const offset = spreadOffset(i, ids.length);
+      const order: SquadOrder = {
+        dest: { x: dest.x + offset.x, y: dest.y + offset.y },
+        mode, facing, issuedAt: this.time,
+      };
+      slots.push(...planSlots(this.scene, squad, this.units, order).slots);
+    });
+    return slots;
   }
 
   update(dt: number): void {
