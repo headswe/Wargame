@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wargame — level editor</title>
+    <link rel="stylesheet" href="/src/editor/editor.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="menubar">
+        <span class="brand">LEVEL EDITOR</span>
+        <span class="group">
+          <button data-act="new">New</button>
+          <button data-act="open">Open</button>
+          <button data-act="save">Save</button>
+          <button data-act="sample">Load Stepove</button>
+        </span>
+        <span class="group">
+          <button data-act="undo" title="Ctrl+Z">Undo</button>
+          <button data-act="redo" title="Ctrl+Shift+Z">Redo</button>
+        </span>
+        <span class="group">
+          <label>Overlay
+            <select id="overlay">
+              <option value="none">off</option>
+              <option value="walkable">where men can go</option>
+              <option value="fire">what the defence covers</option>
+              <option value="cover">how exposed you are</option>
+            </select>
+          </label>
+          <label>Snap
+            <select id="snap">
+              <option value="0">off</option>
+              <option value="0.5">0.5m</option>
+              <option value="1" selected>1m</option>
+              <option value="2">2m</option>
+              <option value="5">5m</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="grid" checked /> Grid</label>
+        </span>
+        <span class="group right">
+          <button data-act="top">Top-down</button>
+          <button data-act="frame">Frame</button>
+          <button class="go" data-act="playtest">Playtest &rsaquo;</button>
+        </span>
+      </header>
+
+      <aside id="tools"></aside>
+
+      <main id="stage">
+        <canvas id="view"></canvas>
+        <div id="readout"></div>
+      </main>
+
+      <aside id="side">
+        <section id="inspector"></section>
+        <section id="level"></section>
+        <section id="outline"></section>
+        <section id="report"></section>
+      </aside>
+
+      <footer id="status"><span id="hint"></span><span id="coords"></span></footer>
+    </div>
+    <input type="file" id="file" accept="application/json,.json" hidden />
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>

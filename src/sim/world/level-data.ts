@@ -1,5 +1,7 @@
 import type { Vec2 } from '../math.ts';
 import { type Opening, type WallSpec, building, hedgerow, obstacle, rect, revetment, wall } from './builder.ts';
+
+export type { Opening, WallSpec };
 import type { Fabric } from './geometry.ts';
 import { Scene } from './scene.ts';
 import type { Surface } from './terrain.ts';
@@ -20,6 +22,26 @@ import type { Surface } from './terrain.ts';
  * person.
  */
 
+/**
+ * Bumped whenever the shape of a saved level changes.
+ *
+ * Levels outlive the code that wrote them the moment anyone saves one, so a
+ * file says which format it is and `migrate` brings old ones forward. Refusing
+ * to load somebody's level because a field was renamed is how an editor loses
+ * a user's afternoon.
+ */
+export const LEVEL_FORMAT = 1;
+
+/** Fields every operation carries, so an editor can track one across edits. */
+export interface OpMeta {
+  /** Stable across saves. Assigned on load when a hand-written level omits it. */
+  id?: string;
+  /** What the author calls it in the outline. */
+  name?: string;
+  /** Hidden in the editor; still built. */
+  muted?: boolean;
+}
+
 export interface RectSpec {
   at: Vec2;
   width: number;
@@ -27,7 +49,7 @@ export interface RectSpec {
   angle?: number;
 }
 
-export type TerrainOp =
+export type TerrainOp = OpMeta & (
   /** A whole surface from a coarse control grid. What an editor writes. */
   | {
     op: 'heightmap';
@@ -45,9 +67,9 @@ export type TerrainOp =
   | { op: 'cut'; path: Vec2[]; width: number; depth: number; surface?: Surface; curve?: boolean }
   | { op: 'road'; path: Vec2[]; width: number; surface?: Surface; curve?: boolean }
   | { op: 'paint'; min: Vec2; max: Vec2; surface: Surface }
-  | { op: 'crater'; at: Vec2; radius: number; depth: number };
+  | { op: 'crater'; at: Vec2; radius: number; depth: number });
 
-export type StructureOp =
+export type StructureOp = OpMeta & (
   | {
     op: 'building';
     /** Either an explicit polygon, or a rectangle. Exactly one of the two. */
@@ -76,12 +98,17 @@ export type StructureOp =
     top?: number;
     curve?: boolean;
   }
-  | { op: 'obstacle'; at: Vec2; radius: number; top?: number; fabric?: Fabric };
+  | { op: 'obstacle'; at: Vec2; radius: number; top?: number; fabric?: Fabric });
 
 export interface LevelData {
+  /** Format version, so a file written today still opens next year. */
+  version?: number;
   id: string;
   name: string;
   brief: string;
+  /** Free text for whoever opens it next. Never shown in game. */
+  notes?: string;
+  author?: string;
   size: { width: number; height: number };
   /** Applied in order. Later operations cut and paint over earlier ones. */
   terrain: TerrainOp[];
@@ -192,4 +219,227 @@ export function applyLevel(scene: Scene, data: LevelData): void {
   scene.spawns.teams = data.spawns.teams.map((team) => team.map((p) => ({ ...p })));
   scene.spawns.enemies = data.spawns.enemies.map((e) => ({ pos: { ...e.pos }, heavy: e.heavy }));
   scene.spawns.objectives = data.spawns.objectives.map((p) => ({ ...p }));
+}
+
+// ------------------------------------------------------------------- lifecycle
+
+let nextOpId = 1;
+
+/** Every operation gets a stable handle, so an editor can follow one across edits. */
+export function assignIds(data: LevelData): LevelData {
+  const seen = new Set<string>();
+  const stamp = (op: OpMeta): void => {
+    if (!op.id || seen.has(op.id)) op.id = `op${nextOpId++}`;
+    seen.add(op.id);
+  };
+  for (const op of data.terrain) stamp(op);
+  for (const op of data.structures) stamp(op);
+  return data;
+}
+
+/** A level with nothing on it but ground and somewhere to start. */
+export function blankLevel(width = 140, height = 110): LevelData {
+  return assignIds({
+    version: LEVEL_FORMAT,
+    id: 'untitled',
+    name: 'Untitled',
+    brief: 'No briefing yet.',
+    size: { width, height },
+    terrain: [{ op: 'rolling', amplitude: 1.2, wavelength: 34, seed: 3 }],
+    structures: [],
+    spawns: {
+      teams: [
+        [vecAt(width * 0.4, height - 10), vecAt(width * 0.4 + 1.6, height - 10)],
+      ],
+      enemies: [{ pos: vecAt(width * 0.5, height * 0.25), heavy: false }],
+      objectives: [vecAt(width * 0.5, height * 0.18)],
+    },
+  });
+}
+
+function vecAt(x: number, y: number): Vec2 {
+  return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+}
+
+/**
+ * Bring a file written by an older build forward.
+ *
+ * Levels outlive the code that wrote them the moment somebody saves one, so
+ * this is a one-way ratchet with a step per format change rather than a version
+ * check that refuses to open anything unfamiliar.
+ */
+export function migrate(raw: unknown): LevelData {
+  if (!raw || typeof raw !== 'object') throw new Error('not a level: expected an object');
+  const data = raw as LevelData & { version?: number };
+  const from = data.version ?? 0;
+
+  if (from > LEVEL_FORMAT) {
+    throw new Error(
+      `this level was written by a newer build (format ${from}, this one reads ${LEVEL_FORMAT})`,
+    );
+  }
+  // Format 0 is anything written before levels carried a version at all: the
+  // shape is already right, it simply never said so.
+  data.version = LEVEL_FORMAT;
+  data.terrain ??= [];
+  data.structures ??= [];
+  data.spawns ??= { teams: [], enemies: [], objectives: [] };
+  data.spawns.teams ??= [];
+  data.spawns.enemies ??= [];
+  data.spawns.objectives ??= [];
+  return assignIds(data);
+}
+
+export function serialiseLevel(data: LevelData): string {
+  return `${JSON.stringify({ ...data, version: LEVEL_FORMAT }, null, 2)}\n`;
+}
+
+// ------------------------------------------------------------------ validation
+
+export interface Problem {
+  severity: 'error' | 'warning';
+  /** The operation's id, or a section name like 'spawns'. */
+  where: string;
+  message: string;
+}
+
+const TERRAIN_OPS = new Set(['heightmap', 'rolling', 'mound', 'bank', 'cut', 'road', 'paint', 'crater']);
+const STRUCTURE_OPS = new Set(['building', 'wall', 'revetment', 'hedgerow', 'obstacle']);
+
+/**
+ * Everything wrong with a level that can be seen without running it.
+ *
+ * Reported rather than thrown. An editor has to be able to show a level that is
+ * half-finished — that is what being half-finished looks like — while still
+ * saying plainly which parts will not work, and an author needs the whole list
+ * rather than whichever problem happened to be found first.
+ */
+export function validateLevel(data: LevelData): Problem[] {
+  const problems: Problem[] = [];
+  const say = (severity: Problem['severity'], where: string, message: string): void => {
+    problems.push({ severity, where, message });
+  };
+
+  const { width, height } = data.size ?? { width: 0, height: 0 };
+  if (!(width > 8) || !(height > 8)) say('error', 'size', 'a level needs to be at least 8m each way');
+
+  const inside = (p: Vec2 | undefined): boolean =>
+    !!p && Number.isFinite(p.x) && Number.isFinite(p.y)
+    && p.x >= 0 && p.y >= 0 && p.x <= width && p.y <= height;
+
+  const checkPath = (where: string, path: Vec2[] | undefined, least: number): void => {
+    if (!path || path.length < least) {
+      say('error', where, `needs at least ${least} points`);
+      return;
+    }
+    if (!path.every(inside)) say('warning', where, 'runs outside the level');
+  };
+
+  for (const op of data.terrain) {
+    const where = op.id ?? op.op;
+    if (!TERRAIN_OPS.has(op.op)) {
+      say('error', where, `unknown terrain operation "${op.op}"`);
+      continue;
+    }
+    switch (op.op) {
+      case 'bank':
+      case 'cut':
+      case 'road':
+        checkPath(where, op.path, 2);
+        if (!(op.width > 0)) say('error', where, 'width must be positive');
+        break;
+      case 'mound':
+      case 'crater':
+        if (!inside(op.at)) say('warning', where, 'sits outside the level');
+        if (!(op.radius > 0)) say('error', where, 'radius must be positive');
+        break;
+      case 'heightmap':
+        if (!(op.cols >= 2) || !(op.rows >= 2)) say('error', where, 'needs a grid of at least 2x2');
+        else if (op.heights.length !== op.cols * op.rows) {
+          say('error', where, `grid is ${op.cols}x${op.rows} but carries ${op.heights.length} heights`);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  for (const op of data.structures) {
+    const where = op.id ?? op.op;
+    if (!STRUCTURE_OPS.has(op.op)) {
+      say('error', where, `unknown structure operation "${op.op}"`);
+      continue;
+    }
+    switch (op.op) {
+      case 'building': {
+        const footprint = op.footprint
+          ?? (op.rect ? rect(op.rect.at, op.rect.width, op.rect.depth, op.rect.angle ?? 0) : null);
+        if (!footprint) {
+          say('error', where, 'a building needs either a footprint or a rect');
+          break;
+        }
+        if (footprint.length < 3) say('error', where, 'a footprint needs at least three corners');
+        else if (!footprint.every(inside)) say('warning', where, 'sticks out of the level');
+        for (const opening of op.openings ?? []) {
+          if (opening.side < 0 || opening.side >= footprint.length) {
+            say('error', where, `an opening is on wall ${opening.side}, which does not exist`);
+            continue;
+          }
+          const a = footprint[opening.side];
+          const b = footprint[(opening.side + 1) % footprint.length];
+          checkOpening(say, where, opening, Math.hypot(b.x - a.x, b.y - a.y));
+        }
+        break;
+      }
+      case 'wall':
+        if (!inside(op.a) || !inside(op.b)) say('warning', where, 'runs outside the level');
+        for (const opening of op.openings ?? []) {
+          checkOpening(say, where, opening, Math.hypot(op.b.x - op.a.x, op.b.y - op.a.y));
+        }
+        break;
+      case 'revetment':
+      case 'hedgerow':
+        checkPath(where, op.path, 2);
+        break;
+      case 'obstacle':
+        if (!inside(op.at)) say('warning', where, 'sits outside the level');
+        if (!(op.radius > 0)) say('error', where, 'radius must be positive');
+        break;
+      default:
+        break;
+    }
+  }
+
+  const teams = data.spawns.teams.filter((t) => t.length > 0);
+  if (teams.length === 0) say('error', 'spawns', 'nobody starts here: place at least one team');
+  if (data.spawns.objectives.length === 0) say('error', 'spawns', 'no objective to take');
+  if (data.spawns.enemies.length === 0) say('warning', 'spawns', 'nobody is defending it');
+  for (const team of data.spawns.teams) {
+    if (team.some((p) => !inside(p))) say('error', 'spawns', 'a start position is off the map');
+  }
+  for (const e of data.spawns.enemies) {
+    if (!inside(e.pos)) say('error', 'spawns', 'a defender is off the map');
+  }
+  for (const o of data.spawns.objectives) {
+    if (!inside(o)) say('error', 'spawns', 'an objective is off the map');
+  }
+  return problems;
+}
+
+function checkOpening(
+  say: (s: Problem['severity'], w: string, m: string) => void,
+  where: string,
+  opening: Opening,
+  length: number,
+): void {
+  if (!(opening.width > 0)) {
+    say('error', where, 'an opening has no width');
+    return;
+  }
+  if (opening.at === 'centre') return;
+  if (opening.at < 0 || opening.at > length) {
+    say('error', where, `an opening sits ${opening.at.toFixed(1)}m along a ${length.toFixed(1)}m wall`);
+  } else if (opening.at - opening.width / 2 < 0 || opening.at + opening.width / 2 > length) {
+    say('warning', where, 'an opening runs off the end of its wall');
+  }
 }

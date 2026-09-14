@@ -1,0 +1,96 @@
+:root {
+  --bg: #14171a;
+  --panel: #1b1f22;
+  --edge: #2b3237;
+  --text: #d9e0d6;
+  --dim: #8a948a;
+  --accent: #4fd2e0;
+  --warn: #e0c14f;
+  --danger: #ff5c5c;
+  --good: #6fd08a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font: 12px/1.45 ui-monospace, SF Mono, Menlo, Consolas, monospace; }
+
+#app { display: grid; height: 100%;
+  grid-template-columns: 148px 1fr 312px;
+  grid-template-rows: 34px 1fr 22px;
+  grid-template-areas: "menu menu menu" "tools stage side" "status status status"; }
+
+#menubar { grid-area: menu; display: flex; align-items: center; gap: 14px; padding: 0 10px;
+  background: var(--panel); border-bottom: 1px solid var(--edge); }
+#menubar .brand { letter-spacing: 0.18em; color: var(--accent); font-weight: 600; }
+#menubar .group { display: flex; align-items: center; gap: 6px; }
+#menubar .group.right { margin-left: auto; }
+#menubar label { color: var(--dim); display: flex; align-items: center; gap: 4px; }
+#menubar label.check { gap: 3px; }
+
+button, select, input[type=number], input[type=text] {
+  font: inherit; color: var(--text); background: #232a2e; border: 1px solid var(--edge);
+  border-radius: 2px; padding: 2px 7px; }
+button { cursor: pointer; }
+button:hover { background: #2d363b; }
+button.go { background: #1f4d55; border-color: #2f7d88; color: #cdf3f7; }
+button.on { background: #2f7d88; border-color: var(--accent); color: #eafcff; }
+select { padding: 1px 4px; }
+
+#tools { grid-area: tools; background: var(--panel); border-right: 1px solid var(--edge);
+  overflow-y: auto; padding: 6px; }
+#tools h4 { margin: 8px 2px 4px; font-size: 9px; letter-spacing: 0.16em; color: var(--dim);
+  text-transform: uppercase; font-weight: 500; }
+#tools button { display: block; width: 100%; text-align: left; margin-bottom: 2px; }
+#tools button .k { float: right; color: var(--dim); font-size: 10px; }
+/* The tool rail is narrow, so its settings put the label above the input
+   rather than beside it; a 30px number box is not a number box. */
+#tools .field { grid-template-columns: 1fr; gap: 1px; margin-bottom: 5px; }
+#tools .field label { font-size: 10px; }
+
+#stage { grid-area: stage; position: relative; min-width: 0; }
+#view { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#readout { position: absolute; left: 10px; top: 10px; pointer-events: none;
+  font-size: 11px; color: var(--dim); white-space: pre; line-height: 1.6; }
+#readout b { color: var(--text); font-weight: 500; }
+
+#side { grid-area: side; background: var(--panel); border-left: 1px solid var(--edge);
+  overflow-y: auto; }
+#side section { border-bottom: 1px solid var(--edge); padding: 8px 10px; }
+#side h3 { margin: 0 0 7px; font-size: 9px; letter-spacing: 0.16em; color: var(--dim);
+  text-transform: uppercase; font-weight: 500; }
+#side .empty { color: var(--dim); font-style: italic; }
+
+.field { display: grid; grid-template-columns: 96px 1fr; gap: 5px; align-items: center;
+  margin-bottom: 4px; }
+.field label { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.field input, .field select { width: 100%; }
+.field.wide { grid-template-columns: 1fr; }
+
+.rowlist { max-height: 210px; overflow-y: auto; margin: 0 -4px; }
+.row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 2px;
+  cursor: pointer; }
+.row:hover { background: #262e33; }
+.row.sel { background: #2f4a50; color: #eafcff; }
+.row .kind { color: var(--dim); font-size: 10px; margin-left: auto; }
+.row .mute { color: var(--dim); }
+
+.openings { margin-top: 4px; }
+.opening { display: grid; grid-template-columns: 40px 1fr 1fr 58px 20px; gap: 3px; margin-bottom: 3px; }
+.opening input, .opening select { padding: 1px 3px; font-size: 11px; }
+.opening button { padding: 0 3px; }
+
+.problem { display: flex; gap: 6px; padding: 2px 0; align-items: baseline; }
+.problem .sev { font-size: 9px; letter-spacing: 0.1em; }
+.problem.error .sev { color: var(--danger); }
+.problem.warning .sev { color: var(--warn); }
+.problem .msg { flex: 1; }
+.ok { color: var(--good); }
+
+#status { grid-area: status; display: flex; justify-content: space-between; padding: 0 10px;
+  background: var(--panel); border-top: 1px solid var(--edge); color: var(--dim);
+  align-items: center; font-size: 11px; }
+
+.stat { display: flex; justify-content: space-between; color: var(--dim); }
+.stat b { color: var(--text); font-weight: 500; }
+
+textarea { font: inherit; color: var(--text); background: #232a2e; border: 1px solid var(--edge);
+  border-radius: 2px; padding: 3px 6px; width: 100%; resize: vertical; }

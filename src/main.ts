@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import './ui/style.css';
 
 import { STEPOVE } from './sim/levels.ts';
+import { type LevelDef, defineLevel, migrate } from './sim/world/level-data.ts';
 import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
 import type { Vec2 } from './sim/math.ts';
@@ -38,6 +39,28 @@ scene.background = new THREE.Color(0x0d0f0d);
 
 const iso = new IsoCamera();
 
+/**
+ * The level this run is playing.
+ *
+ * Normally the shipped one. When the editor opens a playtest it leaves the
+ * level it is working on in session storage first, so what you play is exactly
+ * what is on the author's screen rather than the last thing he saved — which is
+ * the difference between a playtest button and an export step.
+ */
+const LEVEL: LevelDef = resolveLevel();
+
+function resolveLevel(): LevelDef {
+  try {
+    if (new URLSearchParams(location.search).has('playtest')) {
+      const raw = sessionStorage.getItem('wargame.playtest');
+      if (raw) return defineLevel(migrate(JSON.parse(raw)));
+    }
+  } catch (error) {
+    console.warn('could not load the playtest level, falling back:', error);
+  }
+  return STEPOVE;
+}
+
 class Mission {
   readonly sim: Sim;
   private readonly root = new THREE.Group();
@@ -58,7 +81,7 @@ class Mission {
   private readonly contacted = new Set<number>();
 
   constructor(seed: number, onRestart: () => void) {
-    this.sim = new Sim(STEPOVE, seed);
+    this.sim = new Sim(LEVEL, seed);
 
     this.fog = new FogOfWar(this.sim);
     this.root.add(buildLighting(this.sim.scene));
@@ -73,7 +96,7 @@ class Mission {
     );
     scene.add(this.root);
 
-    this.hud = new Hud(uiRoot, STEPOVE, this.sim, (id) => this.select([id], false), onRestart);
+    this.hud = new Hud(uiRoot, LEVEL, this.sim, (id) => this.select([id], false), onRestart);
 
     this.controls = new Controls(canvas, iso, selectionBox, {
       squadAt: (ground) => {

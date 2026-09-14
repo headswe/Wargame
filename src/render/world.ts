@@ -58,7 +58,12 @@ export class WorldView {
   private readonly scale = new THREE.Vector3();
   private readonly colour = new THREE.Color();
 
-  constructor(scene: SimScene, fog: FogOfWar) {
+  /**
+   * `fog` is optional so the level editor can mount the game's own renderer.
+   * An editor that draws the world a second way is an editor that lies about
+   * what the level looks like, which is the one thing it must not do.
+   */
+  constructor(scene: SimScene, fog?: Pick<FogOfWar, 'applyTo'>) {
     this.scene = scene;
     this.group.name = 'world';
 
@@ -117,12 +122,14 @@ export class WorldView {
     });
     this.flush();
 
-    this.group.traverse((object) => {
-      const material = (object as THREE.Mesh).material;
-      if (!material) return;
-      if (Array.isArray(material)) material.forEach((m) => fog.applyTo(m));
-      else fog.applyTo(material);
-    });
+    if (fog) {
+      this.group.traverse((object) => {
+        const material = (object as THREE.Mesh).material;
+        if (!material) return;
+        if (Array.isArray(material)) material.forEach((m) => fog.applyTo(m));
+        else fog.applyTo(material);
+      });
+    }
   }
 
   /** Redraw whatever the simulation broke since last frame. */

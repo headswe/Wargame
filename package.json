@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "playtest": "node tools/playtest.mjs",
-    "balance": "node --experimental-strip-types tools/balance.ts"
+    "balance": "node --experimental-strip-types tools/balance.ts",
+    "editor-check": "node tools/editor-check.mjs"
   },
   "dependencies": {
     "@types/earcut": "^3.0.0",
