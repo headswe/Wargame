@@ -173,18 +173,29 @@ function cross(seed: number, useSmoke: boolean) {
 }
 
 test('smoke is what makes open ground crossable', () => {
-  for (const seed of [1, 2]) {
-    const open = cross(seed, false);
+  // Aggregated rather than asserted seed by seed. Since teams can now break
+  // and withdraw, a single run turns on whether one squad's nerve went — which
+  // is the game working, not a property of smoke, and a per-seed assertion
+  // measures the wrong thing.
+  const seeds = [1, 2, 3, 4];
+  let openAcross = 0;
+  let screenedAcross = 0;
+  let screenedUp = 0;
+  for (const seed of seeds) {
+    openAcross += cross(seed, false).across;
     const screened = cross(seed, true);
-    assert.ok(
-      open.across === 0,
-      `seed ${seed}: ${open.across} men walked into a machine gun across open ground and lived`,
-    );
-    assert.ok(
-      screened.across >= 3 && screened.up >= 3,
-      `seed ${seed}: behind smoke only ${screened.across} crossed with ${screened.up} still up`,
-    );
+    screenedAcross += screened.across;
+    screenedUp += screened.up;
   }
+  const total = seeds.length * 4;
+  assert.equal(
+    openAcross, 0,
+    `${openAcross} of ${total} walked into a machine gun across open ground and lived`,
+  );
+  assert.ok(
+    screenedAcross >= total * 0.6 && screenedUp >= total * 0.6,
+    `behind smoke only ${screenedAcross}/${total} crossed with ${screenedUp}/${total} still up`,
+  );
 });
 
 test('a live grenade moves the man it lands next to', () => {

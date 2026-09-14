@@ -8,6 +8,21 @@ import { Stature } from './world/occlusion.ts';
 export const PIN_THRESHOLD = 0.72;
 export const UNPIN_THRESHOLD = 0.45;
 export const SUPPRESSION_DECAY = 0.25;
+/**
+ * Fear per round passing close, before the weapon's own multiplier.
+ *
+ * Set for the volume of fire this game actually produces, which is far lower
+ * than the volume a real firefight produces: operators here engage with a few
+ * aimed rounds rather than by emptying magazines, so a figure tuned for
+ * hundreds of rounds a minute left suppression doing nothing at all. Measured
+ * across a full assault, defenders averaged two thousandths of a point of it,
+ * and spent two seconds out of a thousand under anything worth the name.
+ *
+ * At this value one rifleman firing bursts at you holds you around a half, and
+ * a belt-fed buries you — which is the relationship the weapon table has always
+ * described and never delivered.
+ */
+const SUPPRESSION_PER_ROUND = 0.075;
 
 export interface ShotEffect {
   kind: 'shot';
@@ -102,6 +117,9 @@ export function hitChance(scene: Scene, shooter: Unit, target: Unit): HitBreakdo
   p *= shooterStanceFactor(shooter);
   p *= 1 - shooter.suppression * 0.78;
   p *= shooter.weaponReady;
+  // A shaken team shoots worse than a steady one holding the same wall, which
+  // is what makes fire that never kills anybody still worth sending.
+  p *= 0.6 + 0.4 * shooter.nerve;
   p *= sighting.exposure;
   p *= targetMotionFactor(target);
   // Foliage and smoke do not stop a round, but they do stop you aiming at what
@@ -137,7 +155,7 @@ export function applySuppressionAlong(
     const d = distPointToSegment(u.pos, from, to);
     if (d > 1.8) continue;
     u.suppression = clamp(
-      u.suppression + power * 0.022 * (1 - invLerpClamped(d, 0.3, 1.8)), 0, 1,
+      u.suppression + power * SUPPRESSION_PER_ROUND * (1 - invLerpClamped(d, 0.3, 1.8)), 0, 1,
     );
   }
 }

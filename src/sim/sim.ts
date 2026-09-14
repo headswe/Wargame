@@ -7,8 +7,9 @@ import {
   Faction, MoveMode, UnitState, WEAPONS, type Role, type Unit, makeUnit, resetUnitIds,
 } from './units.ts';
 import {
-  type PlannedSlot, type Squad, type SquadOrder, assignSlots, planSlots, spreadOffset,
+  type PlannedSlot, type Squad, type SquadOrder, assignSlots, freshMorale, planSlots, spreadOffset,
 } from './squads.ts';
+import { Nerve } from './morale.ts';
 import { type Effect, canReach } from './combat.ts';
 import {
   type InFlight, Ordnance, launch, pickThrower, resetOrdnanceIds, spend, stockOf,
@@ -113,6 +114,7 @@ export class Sim implements SimContext {
         memberIds: [],
         order: null,
         threatDir: vec(0, -1),
+      morale: freshMorale(),
       };
       positions.slice(0, FIRETEAM.length).forEach((pos, i) => {
         const spec = FIRETEAM[i];
@@ -132,33 +134,46 @@ export class Sim implements SimContext {
     });
   }
 
+  /**
+   * The defence, as a handful of positions rather than one fourteen-man block.
+   *
+   * Grouping by proximity is not cosmetic. A single squad shares contacts, so
+   * one sentry seeing you told the entire village at once; and morale is held
+   * per squad, so fourteen men in one would lose their nerve simultaneously,
+   * which is neither how it works nor any fun to fight. Broken into groups,
+   * each position sees for itself and breaks for itself, and taking a village
+   * becomes taking one position at a time.
+   */
   private spawnHostiles(): void {
-    const squad: Squad = {
-      id: this.squads.length,
-      name: 'HOSTILE',
-      faction: Faction.Hostile,
-      memberIds: [],
-      order: null,
-      threatDir: vec(0, 1),
-    };
-
-    this.scene.spawns.enemies.forEach((spawn, i) => {
-      const unit = makeUnit({
-        name: spawn.heavy ? 'Gunner' : `Guard ${i + 1}`,
-        role: spawn.heavy ? 'Automatic Rifleman' : 'Rifleman',
+    let index = 0;
+    for (const group of clusterSpawns(this.scene.spawns.enemies)) {
+      const squad: Squad = {
+        id: this.squads.length,
+        name: `HOSTILE ${this.squads.length - TEAM_NAMES.length + 1}`,
         faction: Faction.Hostile,
-        squadId: squad.id,
-        pos: spawn.pos,
-        weapon: spawn.heavy ? WEAPONS.pkm : WEAPONS.ak,
-        facing: Math.PI / 2,
-        maxHp: 85,
-      });
-      this.place(unit);
-      this.digIn(unit);
-      squad.memberIds.push(unit.id);
-    });
-
-    this.squads.push(squad);
+        memberIds: [],
+        order: null,
+        threatDir: vec(0, 1),
+        morale: freshMorale(),
+      };
+      for (const spawn of group) {
+        index++;
+        const unit = makeUnit({
+          name: spawn.heavy ? `Gunner ${index}` : `Guard ${index}`,
+          role: spawn.heavy ? 'Automatic Rifleman' : 'Rifleman',
+          faction: Faction.Hostile,
+          squadId: squad.id,
+          pos: spawn.pos,
+          weapon: spawn.heavy ? WEAPONS.pkm : WEAPONS.ak,
+          facing: Math.PI / 2,
+          maxHp: 85,
+        });
+        this.place(unit);
+        this.digIn(unit);
+        squad.memberIds.push(unit.id);
+      }
+      this.squads.push(squad);
+    }
   }
 
   /**
@@ -236,9 +251,12 @@ export class Sim implements SimContext {
   }
 
   /** The player's only verb: send a team somewhere, at a tempo, facing a way. */
-  orderSquad(squadId: number, dest: Vec2, mode: MoveMode, facing: number | null): void {
+  orderSquad(squadId: number, dest: Vec2, mode: MoveMode, facing: number | null): boolean {
     const squad = this.squads[squadId];
-    if (!squad || squad.faction !== Faction.Player) return;
+    if (!squad || squad.faction !== Faction.Player) return false;
+    // Men who have broken are not listening. Getting them back is a matter of
+    // giving them somewhere quiet to be, not of telling them again.
+    if (squad.morale.state === Nerve.Broken) return false;
 
     const order: SquadOrder = { dest: { ...dest }, mode, facing, issuedAt: this.time };
     squad.order = order;
@@ -250,6 +268,7 @@ export class Sim implements SimContext {
       u.pathIndex = 0;
     }
     assignSlots(this.scene, squad, this.units, order);
+    return true;
   }
 
   /**
@@ -357,7 +376,7 @@ export class Sim implements SimContext {
       if (u.throwCooldown > 0) u.throwCooldown -= dt;
     }
 
-    for (const squad of this.squads) updateSquad(this, squad);
+    for (const squad of this.squads) updateSquad(this, squad, dt);
     for (const u of this.unitList) updateUnit(this, u, dt);
 
     this.visibilityTimer -= dt;
@@ -377,8 +396,14 @@ export class Sim implements SimContext {
       this.missionState = MissionState.Lost;
       return;
     }
-    const hostilesLeft = this.unitList.some(
-      (u) => u.faction === Faction.Hostile && u.state === UnitState.Active,
+    // A defence that has broken is a defence you have beaten. Requiring it to
+    // be exterminated instead made the endgame a hunt for the last frightened
+    // man in a village, which is both the dullest part of the fight and most of
+    // its running time.
+    const holding = this.unitList.some(
+      (u) => u.faction === Faction.Hostile
+        && u.state === UnitState.Active
+        && this.squads[u.squadId]?.morale.state !== Nerve.Broken,
     );
     const onObjective = this.unitList.some(
       (u) =>
@@ -386,7 +411,7 @@ export class Sim implements SimContext {
         u.state === UnitState.Active &&
         dist(u.pos, this.objective) < 4,
     );
-    if (!hostilesLeft && onObjective) this.missionState = MissionState.Won;
+    if (!holding && onObjective) this.missionState = MissionState.Won;
   }
 
   isVisible(x: number, y: number): boolean {
@@ -464,4 +489,47 @@ export class Sim implements SimContext {
       }
     }
   }
+}
+
+/**
+ * Break a line of spawn points into positions that can plausibly see and hear
+ * each other. Greedy nearest-neighbour: good enough for hand-placed defenders,
+ * and it keeps a machine gun with the riflemen protecting it.
+ */
+function clusterSpawns(
+  spawns: { pos: Vec2; heavy: boolean }[],
+  size = 3,
+): { pos: Vec2; heavy: boolean }[][] {
+  const left = [...spawns];
+  const groups: { pos: Vec2; heavy: boolean }[][] = [];
+  while (left.length > 0) {
+    const seed = left.shift()!;
+    const group = [seed];
+    left.sort((a, b) => dist(a.pos, seed.pos) - dist(b.pos, seed.pos));
+    while (group.length < size && left.length > 0 && dist(left[0].pos, seed.pos) < 42) {
+      group.push(left.shift()!);
+    }
+    groups.push(group);
+  }
+
+  // Nobody is left on his own. A man alone is not a position, he cannot break
+  // as a team, and losing his nerve is not an event worth modelling.
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i].length > 1 || groups.length === 1) continue;
+    const orphan = groups[i][0];
+    let nearest = -1;
+    let best = Infinity;
+    for (let j = 0; j < groups.length; j++) {
+      if (j === i) continue;
+      const d = dist(groups[j][0].pos, orphan.pos);
+      if (d < best) {
+        best = d;
+        nearest = j;
+      }
+    }
+    if (nearest < 0) continue;
+    groups[nearest].push(orphan);
+    groups.splice(i, 1);
+  }
+  return groups;
 }

@@ -196,6 +196,10 @@ export interface Unit {
   throwCooldown: number;
   /** Breaking cover to get away from a live one, rather than following orders. */
   diving: boolean;
+  /** His squad's nerve, mirrored here so combat need not look up a squad. */
+  nerve: number;
+  /** He has stopped fighting and is getting out. Overrides being pinned. */
+  routing: boolean;
 
   // Area fire
   /** Ground being raked when there is nothing in sight worth shooting at. */
@@ -272,6 +276,8 @@ export function makeUnit(opts: {
     smokes: opts.role === 'Team Leader' ? 2 : 1,
     throwCooldown: 0,
     diving: false,
+    nerve: 1,
+    routing: false,
     suppressAt: null,
     suppressUntil: 0,
     suppressOrdered: false,

@@ -1,6 +1,7 @@
 import { type Vec2, angleOf, dist, fromAngle, normalize, sub, vec } from './math.ts';
 import type { Scene } from './world/scene.ts';
 import { Stature } from './world/occlusion.ts';
+import { type Morale, freshMorale } from './morale.ts';
 import { Faction, MoveMode, UnitState, type Unit } from './units.ts';
 
 export interface SquadOrder {
@@ -19,7 +20,11 @@ export interface Squad {
   order: SquadOrder | null;
   /** Direction the squad believes danger lies in. Drives every cover choice. */
   threatDir: Vec2;
+  /** How it is holding up, as opposed to how hard it is being shot at. */
+  morale: Morale;
 }
+
+export { freshMorale };
 
 /** How far from the order point an operator will range to find real cover. */
 const COVER_SEARCH_RADIUS = 9;

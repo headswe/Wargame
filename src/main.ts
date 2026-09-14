@@ -370,6 +370,7 @@ window.wargame = {
         pathLength: u.path.length,
         ammo: u.ammoInMag,
         raking: u.suppressAt !== null,
+        nerve: Number((sim.squads[u.squadId]?.morale.nerve ?? 1).toFixed(2)),
         hasSlot: u.slot !== null,
         inCover: u.coverSpot !== null,
         suppression: Number(u.suppression.toFixed(2)),

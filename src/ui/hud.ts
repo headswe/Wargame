@@ -2,6 +2,7 @@ import { MissionState, type Sim } from '../sim/sim.ts';
 import type { LevelDef } from '../sim/levels.ts';
 import { Faction, Posture, UnitState, type Unit } from '../sim/units.ts';
 import type { Squad } from '../sim/squads.ts';
+import { Nerve } from '../sim/morale.ts';
 
 const SQUAD_CSS = ['var(--alpha)', 'var(--bravo)', 'var(--charlie)'];
 const ROLE_SHORT: Record<string, string> = {
@@ -119,14 +120,26 @@ export class Hud {
     const active = members.filter((u) => u.state === UnitState.Active);
     element.classList.toggle('selected', selected);
     element.classList.toggle('wiped', active.length === 0);
+    element.classList.toggle('wavering', squad.morale.state === Nerve.Wavering);
+    element.classList.toggle('broken', squad.morale.state === Nerve.Broken);
 
+    const nerve = squad.morale;
     const pinned = active.some((u) => u.posture === Posture.Pinned);
     const contact = active.some((u) => u.visible.length > 0);
     const raking = active.some((u) => u.suppressAt !== null);
     const moving = active.some((u) => u.path.length > 0);
     let state = 'holding';
     let stateClass = '';
-    if (pinned) {
+    // Nerve outranks everything else on the card. A team that is breaking is
+    // the single thing the player most needs to know, and it is the one state
+    // he cannot infer from watching them.
+    if (nerve.state === Nerve.Broken) {
+      state = 'BROKEN';
+      stateClass = 'broken';
+    } else if (nerve.state === Nerve.Wavering) {
+      state = 'wavering';
+      stateClass = 'pinned';
+    } else if (pinned) {
       state = 'pinned';
       stateClass = 'pinned';
     } else if (contact) {
@@ -152,6 +165,9 @@ export class Hud {
         <span class="state ${stateClass}">${state}</span>
       </header>
       ${members.map((u) => this.renderOperator(u)).join('')}
+      <div class="nerve" title="How the team is holding up">
+        <i style="width:${Math.round(nerve.nerve * 100)}%"></i>
+      </div>
       <div class="stores">
         <span class="${frags === 0 ? 'empty' : ''}">FRAG &times;${frags}</span>
         <span class="${smokes === 0 ? 'empty' : ''}">SMOKE &times;${smokes}</span>

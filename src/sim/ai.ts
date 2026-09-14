@@ -15,6 +15,7 @@ import {
 import {
   type InFlight, FRAG_RADIUS, Ordnance, canThrow, dangerFrom, launch, spend, stockOf,
 } from './ordnance.ts';
+import { Nerve, findRefuge, updateMorale } from './morale.ts';
 import type { Squad } from './squads.ts';
 
 export interface SimContext {
@@ -245,7 +246,11 @@ function separation(ctx: SimContext, u: Unit): Vec2 {
 }
 
 function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
-  if (u.posture === Posture.Pinned) {
+  // Being pinned stops a man who is still trying to fight. It must not stop one
+  // who has given up: fire heavy enough to break a team is also heavy enough to
+  // pin it, so without this the rout is decided and then never happens — they
+  // sit in the position they have abandoned until somebody shoots them.
+  if (u.posture === Posture.Pinned && !u.routing) {
     u.velocity = vec(0, 0);
     return;
   }
@@ -644,12 +649,17 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   updatePosture(u);
   updateWeaponHandling(u, dt);
 
-  const target = selectTarget(ctx, u);
+  const broken = ctx.squads[u.squadId]?.morale.state === Nerve.Broken;
+  const target = broken ? null : selectTarget(ctx, u);
   u.targetId = target?.id ?? null;
+  if (broken) {
+    u.suppressAt = null;
+    u.suppressOrdered = false;
+  }
 
   const fleeing = avoidBlast(ctx, u);
-  if (!fleeing) considerGrenade(ctx, u);
-  updateAreaFire(ctx, u, target);
+  if (!fleeing && !broken) considerGrenade(ctx, u);
+  if (!broken) updateAreaFire(ctx, u, target);
   updateHostileInitiative(ctx, u);
   ensurePath(ctx, u, dt);
   stepMovement(ctx, u, dt);
@@ -660,7 +670,89 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   else if (u.suppressAt) tryFire(ctx, u, u.suppressAt, null, dt);
 }
 
-export function updateSquad(ctx: SimContext, squad: Squad): void {
+/**
+ * A team that has stopped fighting, getting out.
+ *
+ * They run, they do not shoot, and they do not take orders until they have had
+ * a quiet minute somewhere behind cover. That is the whole payoff for
+ * suppression: ground taken off men who are still alive, which is the only way
+ * an attack costs less than the defence it is attacking.
+ */
+function withdraw(ctx: SimContext, squad: Squad): void {
+  const members = squad.memberIds
+    .map((id) => ctx.units.get(id))
+    .filter((u): u is Unit => !!u && u.state === UnitState.Active);
+  if (members.length === 0) return;
+
+  if (!squad.morale.refuge) {
+    squad.morale.refuge = findRefuge(
+      members,
+      squad.threatDir,
+      (x, y) => ctx.scene.walkable(x, y),
+      (from, to) => ctx.scene.findPath(from, to) !== null,
+    );
+  }
+  const refuge = squad.morale.refuge;
+  if (!refuge) return;
+
+  members.forEach((u, i) => {
+    if (u.slot && dist(u.slot, refuge) < 6) return;
+    if (dist(u.pos, refuge) < 4) {
+      u.slot = null;
+      return;
+    }
+    // Scattered rather than in a neat file: they are not a formation any more.
+    const a = (i / members.length) * Math.PI * 2;
+    const spread = vec(refuge.x + Math.cos(a) * 2.4, refuge.y + Math.sin(a) * 2.4);
+    // Checked by pathing rather than by walkability. Ground a body fits on is
+    // not the same as ground the navmesh will route to — the simplified contour
+    // sits inside the walkable field — and a man who cannot be pathed to his
+    // refuge stops dead halfway there and retries for ever.
+    const target = ctx.scene.findPath(u.pos, spread) ? spread
+      : ctx.scene.findPath(u.pos, refuge) ? { ...refuge } : null;
+    if (!target) {
+      // Nowhere from here. Pick somewhere else next tick rather than freeze.
+      squad.morale.refuge = null;
+      return;
+    }
+    u.coverSpot = null;
+    u.suppressAt = null;
+    u.suppressOrdered = false;
+    u.slot = target;
+    u.moveMode = MoveMode.Sprint;
+    u.postFacing = null;
+    u.routing = true;
+  });
+}
+
+export function updateSquad(ctx: SimContext, squad: Squad, dt: number): void {
   shareContacts(ctx, squad);
+
+  const before = squad.morale.state;
+  updateMorale(squad.morale, squad.memberIds.map((id) => ctx.units.get(id))
+    .filter((u): u is Unit => !!u), ctx.time, dt);
+
+  // Mirrored onto the men so combat can price a shaken team without going
+  // looking for one.
+  for (const id of squad.memberIds) {
+    const u = ctx.units.get(id);
+    if (u) u.nerve = squad.morale.nerve;
+  }
+
+  if (squad.morale.state === Nerve.Broken) {
+    if (before !== Nerve.Broken) squad.order = null;
+    withdraw(ctx, squad);
+    return;
+  }
+  if (before === Nerve.Broken) {
+    // Rallied. They are standing again, and holding where they stopped.
+    for (const id of squad.memberIds) {
+      const u = ctx.units.get(id);
+      if (!u || u.state !== UnitState.Active) continue;
+      u.moveMode = MoveMode.Tactical;
+      u.routing = false;
+    }
+  }
+
   if (squad.faction === Faction.Player) considerCasualties(ctx, squad);
 }

@@ -108,6 +108,24 @@ html, body {
 }
 .team .stores .empty { opacity: 0.3; text-decoration: line-through; }
 
+/* How the team is holding up, as opposed to how many of them are alive. */
+.team .nerve {
+  height: 3px;
+  margin-top: 7px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.team .nerve i {
+  display: block;
+  height: 100%;
+  background: #7fa8c4;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.team.wavering .nerve i { background: #d6b45a; }
+.team.broken .nerve i { background: #ff5c5c; }
+.team .state.broken { color: #ff5c5c; font-weight: 700; letter-spacing: 0.1em; }
+
 .team header {
   display: flex;
   justify-content: space-between;
