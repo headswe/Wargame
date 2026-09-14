@@ -79,6 +79,27 @@ test('a door is a doorway, and you walk under the wall above it', () => {
   );
 });
 
+test('a thin wall still has doors you can walk through', () => {
+  // The trap this guards against. Both grids widen the thinnest geometry to a
+  // cell's half-diagonal so a fence cannot vanish between two samples, which
+  // means the ends of a wall bulge into the gap beside them by a fixed amount
+  // no matter how thin the wall is. Cut a doorway by the wall's own thickness
+  // and a thin wall's doors seal — the building looks perfectly normal, has a
+  // door drawn in it, and cannot be entered.
+  for (const thickness of [0.2, 0.35, 0.8]) {
+    const scene = new Scene(100, 100);
+    wall(scene, {
+      a: vec(20, 50), b: vec(80, 50), top: 2.7, thickness,
+      openings: [{ at: 'centre', width: 1.1, kind: 'door' }],
+    });
+    scene.bake();
+    assert.ok(
+      scene.findPath(vec(50, 40), vec(50, 60)) !== null,
+      `a ${thickness}m wall sealed its own doorway`,
+    );
+  }
+});
+
 test('a lintel caps what you can see through the gap under it', () => {
   // Level ground makes a lintel inert: every sightline between two men on the
   // same plane passes under it. It starts mattering the moment anything is

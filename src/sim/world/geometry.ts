@@ -26,6 +26,19 @@ export const Fabric = {
 } as const;
 export type Fabric = (typeof Fabric)[keyof typeof Fabric];
 
+/**
+ * The widest minimum stamp any of the grids applies to a run, in metres.
+ *
+ * Both the sightline field and the navmesh claim every cell a wall passes
+ * through, widening the thinnest geometry to the cell's half-diagonal so that a
+ * fence narrower than a cell does not vanish between two samples. That is the
+ * right way round — a wall slightly fatter than drawn is invisible, a wall that
+ * is not there is a hole in the map — but it means a gap cut in a wall is
+ * narrowed by this much regardless of how thin the wall itself is, and anything
+ * cut to let a man through has to account for it.
+ */
+export const STAMP_FLOOR = 0.71;
+
 /** How much punishment each fabric takes, and how much of a hit tells. */
 export const TOUGHNESS: Record<number, { hp: number; vulnerability: number }> = {
   [Fabric.Concrete]: { hp: 460, vulnerability: 0.18 },

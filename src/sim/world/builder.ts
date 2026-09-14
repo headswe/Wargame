@@ -1,6 +1,15 @@
 import { type Vec2, dist, spline, vec } from '../math.ts';
-import { Fabric, Solidity } from './geometry.ts';
+import { Fabric, STAMP_FLOOR, Solidity } from './geometry.ts';
 import type { Scene } from './scene.ts';
+
+/**
+ * A village wall: one leaf of brick and a coat of render, not a rampart.
+ *
+ * This was 0.8m, chosen to sit above what the sightline grid can resolve, which
+ * confused a limit of the simulation with a fact about the world and drew every
+ * farmhouse as a keep.
+ */
+const WALL_THICKNESS = 0.35;
 
 /** Underside of a doorway's lintel: high enough to walk under, low enough to see over. */
 const DOOR_HEAD = 2.1;
@@ -53,7 +62,7 @@ export interface WallSpec {
 export function wall(scene: Scene, spec: WallSpec): number[] {
   const fabric = spec.fabric ?? Fabric.Brick;
   const top = spec.top ?? 2.7;
-  const thickness = spec.thickness ?? 0.8;
+  const thickness = spec.thickness ?? WALL_THICKNESS;
   const solidity = spec.solidity ?? Solidity.Solid;
   const buildingId = spec.buildingId ?? null;
   const length = dist(spec.a, spec.b);
@@ -74,11 +83,14 @@ export function wall(scene: Scene, spec: WallSpec): number[] {
   const cuts = (spec.openings ?? [])
     .map((o) => {
       const centre = (o.at === 'centre' ? length / 2 : o.at) / length;
-      // Segments are stamped as capsules, so each wall end bulges half a
-      // thickness into the gap between them. A doorway therefore has to be cut
-      // wider than it wants to be, or the author asks for two metres, gets one,
-      // and the navmesh quietly seals the building.
-      const cut = (o.kind === 'door' ? o.width + thickness : o.width) / length;
+      // Each wall end bulges into the gap beside it, by half its thickness or
+      // half the grid's minimum stamp, whichever is wider. A doorway therefore
+      // has to be cut wider than it wants to be, or the author asks for two
+      // metres, gets one, and the navmesh quietly seals the building. Taking
+      // the floor rather than the thickness is what lets a wall get thin
+      // without its doors closing up behind it.
+      const bulge = Math.max(thickness, STAMP_FLOOR);
+      const cut = (o.kind === 'door' ? o.width + bulge : o.width) / length;
       return {
         from: Math.max(0, centre - cut / 2),
         to: Math.min(1, centre + cut / 2),
@@ -140,7 +152,7 @@ export interface BuildingSpec {
 export function building(scene: Scene, spec: BuildingSpec): number[] {
   const fabric = spec.fabric ?? Fabric.Brick;
   const top = spec.wallTop ?? 2.7;
-  const thickness = spec.thickness ?? 0.8;
+  const thickness = spec.thickness ?? WALL_THICKNESS;
   const footprint = spec.footprint;
   const ids: number[] = [];
 

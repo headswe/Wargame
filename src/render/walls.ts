@@ -98,13 +98,16 @@ function masonry(segment: Segment, length: number, integrity: number, out: Piece
   }
 
   if (capped) {
+    // The oversail is an absolute lip rather than a fraction of the wall. A
+    // thin wall with a proportional cap has no cap: the whole job of the course
+    // is to throw a shadow line the eye can find from across the map.
     out.push({
       u: length / 2,
       v: segment.top - capHeight / 2,
       w: 0,
-      su: length + t * 0.35,
+      su: length + 0.14,
       sv: capHeight,
-      sw: t * 1.28,
+      sw: t + 0.11,
       tint: 1.1,
     });
   }
@@ -134,9 +137,9 @@ function lintel(segment: Segment, length: number, out: Piece[]): void {
     u: length / 2,
     v: segment.sill + 0.04,
     w: 0,
-    su: length + t * 0.3,
+    su: length + 0.05,
     sv: 0.08,
-    sw: t * 1.2,
+    sw: t + 0.07,
     tint: 0.82,
   });
 }

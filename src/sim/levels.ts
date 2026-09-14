@@ -93,7 +93,7 @@ export const STEPOVE_DATA: LevelData = {
     {
       op: 'revetment',
       path: [vec(68, 26), vec(86, 24), vec(88, 38), vec(70, 40), vec(68, 26)],
-      fabric: Fabric.Brick, top: 2.2, thickness: 1.0,
+      fabric: Fabric.Brick, top: 2.2, thickness: 0.35,
       openings: [{ side: 3, at: 'centre', width: 2.4, kind: 'door' }],
     },
     { op: 'revetment', path: [vec(72, 30), vec(82, 29)] },
@@ -104,7 +104,7 @@ export const STEPOVE_DATA: LevelData = {
     {
       op: 'building',
       rect: { at: vec(94, 14), width: 34, depth: 16, angle: 0.06 },
-      fabric: Fabric.Concrete, wallTop: 3.1, thickness: 1.0,
+      fabric: Fabric.Concrete, wallTop: 3.1, thickness: 0.45,
       openings: [
         { side: 2, at: 13.6, width: 2.0, kind: 'door' },
         { side: 0, at: 12.2, width: 2.0, kind: 'door' },

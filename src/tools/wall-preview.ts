@@ -45,22 +45,22 @@ function run(
 }
 
 // --- what each fabric is made of, at full height
-run('brick', 0, 0, Fabric.Brick, 2.7, 0.8);
-run('concrete', 1, 0, Fabric.Concrete, 3.1, 1.0);
+run('brick', 0, 0, Fabric.Brick, 2.7, 0.35);
+run('concrete', 1, 0, Fabric.Concrete, 3.1, 0.45);
 run('metal', 2, 0, Fabric.Metal, 2.2, 0.5);
 run('sandbag', 0, 1, Fabric.Sandbag, 0.95, 1.1, 1, Solidity.LowCover);
 run('timber', 1, 1, Fabric.Timber, 1.6, 0.25);
 run('rubble', 2, 1, Fabric.Rubble, 0.7, 1.0, 1, Solidity.LowCover);
 
 // --- and what they look like as they come apart
-run('brick — battered', 0, 2, Fabric.Brick, 2.7, 0.8, 0.45);
-run('brick — spent', 1, 2, Fabric.Brick, 2.7, 0.8, 0.08);
+run('brick — battered', 0, 2, Fabric.Brick, 2.7, 0.35, 0.45);
+run('brick — spent', 1, 2, Fabric.Brick, 2.7, 0.35, 0.08);
 run('sandbag — shot up', 2, 2, Fabric.Sandbag, 0.95, 1.1, 0.35, Solidity.LowCover);
 
 // --- a wall with a door and a window in it, which is the whole reason for this
 wall(sim, {
   a: vec(9, 63), b: vec(27, 63),
-  fabric: Fabric.Brick, top: 2.7, thickness: 0.8,
+  fabric: Fabric.Brick, top: 2.7, thickness: 0.35,
   openings: [
     { at: 4.5, width: 1.1, kind: 'door' },
     { at: 11, width: 1.5, kind: 'window' },
