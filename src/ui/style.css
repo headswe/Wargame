@@ -144,6 +144,8 @@ html, body {
 .op .tag { font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); }
 .op .tag.pinned { color: var(--danger); }
 .op .tag.down { color: var(--warn); }
+.op .tag.shaken { color: var(--warn); }
+.op .tag.broken { color: var(--danger); font-weight: 700; }
 
 .bars { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 1px; }
 .bar { height: 3px; background: rgba(255, 255, 255, 0.09); position: relative; }

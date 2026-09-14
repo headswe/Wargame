@@ -15,7 +15,7 @@ import {
 import {
   type InFlight, FRAG_RADIUS, Ordnance, canThrow, dangerFrom, launch, spend, stockOf,
 } from './ordnance.ts';
-import { Nerve, findRefuge, updateMorale } from './morale.ts';
+import { Nerve, applyCasualtyShock, findRefuge, summarise, updateNerve } from './morale.ts';
 import type { Squad } from './squads.ts';
 
 export interface SimContext {
@@ -478,8 +478,11 @@ function considerCasualties(ctx: SimContext, squad: Squad): void {
   if (casualties.length === 0) return;
 
   for (const casualty of casualties) {
+    // A man who has stopped fighting is not going out to drag anyone back, and
+    // a man who has not is the only one who would.
     const helper = members
-      .filter((m) => m.state === UnitState.Active && !isMoving(m) && !m.slot)
+      .filter((m) => m.state === UnitState.Active && m.nerveState !== Nerve.Broken
+        && !isMoving(m) && !m.slot)
       .sort((a, b) => dist(a.pos, casualty.pos) - dist(b.pos, casualty.pos))[0];
     if (!helper) continue;
     const d = dist(helper.pos, casualty.pos);
@@ -683,7 +686,9 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   updatePosture(u);
   updateWeaponHandling(u, dt);
 
-  const broken = ctx.squads[u.squadId]?.morale.state === Nerve.Broken;
+  // His own nerve, not his team's. A fireteam with one man gone is still three
+  // men shooting, which is the entire point of holding this per soldier.
+  const broken = u.nerveState === Nerve.Broken;
   const target = broken ? null : selectTarget(ctx, u);
   u.targetId = target?.id ?? null;
   if (broken) {
@@ -705,88 +710,117 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
 }
 
 /**
- * A team that has stopped fighting, getting out.
+ * One man who has stopped fighting, getting out.
  *
- * They run, they do not shoot, and they do not take orders until they have had
- * a quiet minute somewhere behind cover. That is the whole payoff for
+ * He runs, he does not shoot, and he does not take orders until he has had a
+ * quiet minute somewhere behind cover. That is the whole payoff for
  * suppression: ground taken off men who are still alive, which is the only way
  * an attack costs less than the defence it is attacking.
+ *
+ * Per man rather than per team, so a position comes apart the way positions
+ * actually come apart. The man beside the casualty goes first and his mate
+ * holds the corner a while longer, and what the player watches is a defence
+ * thinning out under him rather than four men switching off together.
  */
-function withdraw(ctx: SimContext, squad: Squad): void {
-  const members = squad.memberIds
-    .map((id) => ctx.units.get(id))
-    .filter((u): u is Unit => !!u && u.state === UnitState.Active);
-  if (members.length === 0) return;
+function withdraw(ctx: SimContext, squad: Squad, u: Unit): void {
+  if (u.state !== UnitState.Active) return;
 
-  if (!squad.morale.refuge) {
-    squad.morale.refuge = findRefuge(
-      members,
-      squad.threatDir,
+  if (!u.refuge) {
+    // Somewhere behind him, on ground that can actually be pathed to — the
+    // navmesh contour sits inside the walkable field, so a man sent to
+    // walkable-but-unroutable ground stops dead halfway and retries for ever.
+    // Failing that, where he stands: a man with his back to a wall gets his
+    // head down rather than sprinting into the open, and the search does not
+    // run again every tick for somewhere that is not there.
+    u.refuge = findRefuge(
+      u.pos,
+      dangerDir(u, squad.threatDir),
       (x, y) => ctx.scene.walkable(x, y),
       (from, to) => ctx.scene.findPath(from, to) !== null,
+    ) ?? { ...u.pos };
+  }
+
+  if (dist(u.pos, u.refuge) < 4) {
+    // He is where he was going. He stays there, flat, until his nerve is back.
+    u.slot = null;
+    u.routing = false;
+    return;
+  }
+
+  u.coverSpot = null;
+  u.suppressAt = null;
+  u.suppressOrdered = false;
+  u.slot = { ...u.refuge };
+  u.moveMode = MoveMode.Sprint;
+  u.postFacing = null;
+  u.routing = true;
+}
+
+/** Which way one frightened man thinks the trouble is, from what he knows. */
+function dangerDir(u: Unit, fallback: Vec2): Vec2 {
+  let x = 0;
+  let y = 0;
+  for (const [, mem] of u.memory) {
+    if (mem.age > 8) continue;
+    const to = normalize(sub(mem.pos, u.pos));
+    x += to.x;
+    y += to.y;
+  }
+  const dir = normalize(vec(x, y));
+  return dir.x === 0 && dir.y === 0 ? fallback : dir;
+}
+
+/**
+ * Who has just gone down, and what that does to everyone who watched.
+ *
+ * Run once across the whole field rather than inside a squad, because a man
+ * does not check which fireteam somebody was in before being shaken by
+ * watching him fall — and on the defending side the men holding one corner of
+ * a position are routinely in the next squad along.
+ */
+export function updateCasualties(ctx: SimContext): void {
+  for (const u of ctx.unitList) {
+    // Marked here, at the top of the tick and before anybody shoots, so that
+    // who was standing is settled independently of the order units resolve in.
+    if (u.state === UnitState.Active) {
+      u.wasStanding = true;
+      continue;
+    }
+    if (!u.wasStanding) continue;
+    u.wasStanding = false;
+    applyCasualtyShock(
+      ctx.unitList.filter((m) => m !== u && m.faction === u.faction),
+      u,
     );
   }
-  const refuge = squad.morale.refuge;
-  if (!refuge) return;
-
-  members.forEach((u, i) => {
-    if (u.slot && dist(u.slot, refuge) < 6) return;
-    if (dist(u.pos, refuge) < 4) {
-      u.slot = null;
-      return;
-    }
-    // Scattered rather than in a neat file: they are not a formation any more.
-    const a = (i / members.length) * Math.PI * 2;
-    const spread = vec(refuge.x + Math.cos(a) * 2.4, refuge.y + Math.sin(a) * 2.4);
-    // Checked by pathing rather than by walkability. Ground a body fits on is
-    // not the same as ground the navmesh will route to — the simplified contour
-    // sits inside the walkable field — and a man who cannot be pathed to his
-    // refuge stops dead halfway there and retries for ever.
-    const target = ctx.scene.findPath(u.pos, spread) ? spread
-      : ctx.scene.findPath(u.pos, refuge) ? { ...refuge } : null;
-    if (!target) {
-      // Nowhere from here. Pick somewhere else next tick rather than freeze.
-      squad.morale.refuge = null;
-      return;
-    }
-    u.coverSpot = null;
-    u.suppressAt = null;
-    u.suppressOrdered = false;
-    u.slot = target;
-    u.moveMode = MoveMode.Sprint;
-    u.postFacing = null;
-    u.routing = true;
-  });
 }
 
 export function updateSquad(ctx: SimContext, squad: Squad, dt: number): void {
   shareContacts(ctx, squad);
 
-  const before = squad.morale.state;
-  updateMorale(squad.morale, squad.memberIds.map((id) => ctx.units.get(id))
-    .filter((u): u is Unit => !!u), ctx.time, dt);
+  const members = squad.memberIds
+    .map((id) => ctx.units.get(id))
+    .filter((u): u is Unit => !!u);
 
-  // Mirrored onto the men so combat can price a shaken team without going
-  // looking for one.
-  for (const id of squad.memberIds) {
-    const u = ctx.units.get(id);
-    if (u) u.nerve = squad.morale.nerve;
-  }
+  for (const u of members) {
+    const before = u.nerveState;
+    updateNerve(u, members, ctx.time, dt);
 
-  if (squad.morale.state === Nerve.Broken) {
-    if (before !== Nerve.Broken) squad.order = null;
-    withdraw(ctx, squad);
-    return;
-  }
-  if (before === Nerve.Broken) {
-    // Rallied. They are standing again, and holding where they stopped.
-    for (const id of squad.memberIds) {
-      const u = ctx.units.get(id);
-      if (!u || u.state !== UnitState.Active) continue;
+    if (u.nerveState === Nerve.Broken) {
+      withdraw(ctx, squad, u);
+    } else if (before === Nerve.Broken) {
+      // Rallied. He is standing again, and holding where he stopped.
       u.moveMode = MoveMode.Tactical;
       u.routing = false;
+      u.slot = null;
     }
   }
+
+  // The card the player reads is derived from the men, never the other way
+  // round: nothing writes to it, so it cannot drift from what they are doing.
+  squad.morale = summarise(members);
+  // An order nobody left is listening to is not an order.
+  if (squad.morale.state === Nerve.Broken) squad.order = null;
 
   if (squad.faction === Faction.Player) considerCasualties(ctx, squad);
 }

@@ -15,9 +15,9 @@
  *   npm run balance
  *   npm run balance -- bounding      # one plan only
  */
-import { Sim } from '../src/sim/sim.ts';
+import { MissionState, Sim } from '../src/sim/sim.ts';
 import { STEPOVE } from '../src/sim/levels.ts';
-import { Faction, MoveMode, Posture, UnitState } from '../src/sim/units.ts';
+import { Faction, MoveMode, Nerve, Posture, UnitState } from '../src/sim/units.ts';
 import { dist, vec } from '../src/sim/math.ts';
 import { hitChance } from '../src/sim/combat.ts';
 
@@ -88,6 +88,17 @@ interface Result {
   underFire: number;
   pinnedSeconds: number;
   defendersWhoFired: number;
+  /**
+   * Men who lost their nerve at some point, counted one at a time.
+   *
+   * The number the per-soldier rout exists to move. Held per team it could
+   * only ever read 0, 4, 8 or 12; what it should read now is everything in
+   * between, because that is what a position coming apart looks like.
+   */
+  operatorsBroke: number;
+  defendersBroke: number;
+  /** Whether the plan actually took the place, which survivors do not say. */
+  won: number;
 }
 
 function play(plan: Step[], seed: number): Result {
@@ -101,7 +112,9 @@ function play(plan: Step[], seed: number): Result {
     operatorsUp: 0, defendersUp: 0, playerRounds: 0, aimedRounds: 0, blindRounds: 0,
     reachSeconds: 0, acquiredSeconds: 0, outOfRangeSeconds: 0, noLineSeconds: 0,
     underFire: 0, pinnedSeconds: 0, defendersWhoFired: 0,
+    operatorsBroke: 0, defendersBroke: 0, won: 0,
   };
+  const broke = new Set<number>();
 
   let next = 0;
   let tick = 0;
@@ -134,6 +147,10 @@ function play(plan: Step[], seed: number): Result {
       if (p.state !== UnitState.Active) continue;
       if (p.suppression > 0.3) r.underFire += DT;
       if (p.posture === Posture.Pinned) r.pinnedSeconds += DT;
+    }
+
+    for (const u of sim.unitList) {
+      if (u.state === UnitState.Active && u.nerveState === Nerve.Broken) broke.add(u.id);
     }
 
     // Sampled at 1 Hz: a sightline per defender per player is not free, and
@@ -176,6 +193,9 @@ function play(plan: Step[], seed: number): Result {
   r.operatorsUp = players.filter((p) => p.state === UnitState.Active).length;
   r.defendersUp = hostiles.filter((h) => h.state === UnitState.Active).length;
   r.defendersWhoFired = fired.size;
+  r.operatorsBroke = players.filter((p) => broke.has(p.id)).length;
+  r.defendersBroke = hostiles.filter((h) => broke.has(h.id)).length;
+  r.won = sim.missionState === MissionState.Won ? 1 : 0;
   void startingAmmo;
   return r;
 }
@@ -204,7 +224,7 @@ console.log(`Stepove, ${SEEDS.length} seeds, ${DURATION}s each. 12 operators, 14
 console.log(
   `${pad('plan', 9)} ${pad('operators', 10)} ${pad('defenders', 10)} ` +
   `${pad('rounds P/H', 12)} ${pad('blind', 6)} ${pad('reach', 7)} ` +
-  `${pad('acq', 6)} ${pad('underfire', 10)} ${pad('shooters', 8)}`,
+  `${pad('acq', 6)} ${pad('underfire', 10)} ${pad('shooters', 9)} ${pad('broke P/H', 10)} won`,
 );
 for (const [name, runs] of totals) {
   const up = mean(runs.map((x) => x.operatorsUp));
@@ -218,10 +238,14 @@ for (const [name, runs] of totals) {
   const shooters = mean(runs.map((x) => x.defendersWhoFired));
   const far = mean(runs.map((x) => x.outOfRangeSeconds));
   const blind2 = mean(runs.map((x) => x.noLineSeconds));
+  const brokeP = mean(runs.map((x) => x.operatorsBroke));
+  const brokeH = mean(runs.map((x) => x.defendersBroke));
+  const won = runs.reduce((a, x) => a + x.won, 0);
   console.log(
     `${pad(name, 9)} ${num(up, 4)}/12   ${num(def, 4)}/14   ` +
     `${num(pr, 4, 0)}/${num(hr, 4, 0)}   ${num(blind, 4, 0)}  ${num(reach, 5, 0)}s  ` +
-    `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/14  ` +
+    `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/14   ` +
+    `${num(brokeP, 4)}/${num(brokeH, 4)}  ${won}/${runs.length}  ` +
     `| no shot: ${num(far, 4, 0)}s too far, ${num(blind2, 4, 0)}s no line`,
   );
 }
@@ -234,5 +258,6 @@ if (bounding && frontal) {
 }
 console.log(
   '\nreach = defender-seconds with a target in range and in view;' +
-  ' acq = of those, actually acquired.',
+  ' acq = of those, actually acquired;' +
+  '\nbroke = men who lost their nerve at some point, counted one at a time.',
 );

@@ -124,6 +124,7 @@ export class Hud {
     element.classList.toggle('broken', squad.morale.state === Nerve.Broken);
 
     const nerve = squad.morale;
+    const gone = active.filter((u) => u.nerveState !== Nerve.Steady).length;
     const pinned = active.some((u) => u.posture === Posture.Pinned);
     const contact = active.some((u) => u.visible.length > 0);
     const raking = active.some((u) => u.suppressAt !== null);
@@ -136,8 +137,11 @@ export class Hud {
     if (nerve.state === Nerve.Broken) {
       state = 'BROKEN';
       stateClass = 'broken';
-    } else if (nerve.state === Nerve.Wavering) {
-      state = 'wavering';
+    } else if (gone > 0) {
+      // Which is the question a per-man rout raises and a team-level state
+      // cannot answer: not whether the team has gone, but how far through
+      // going it is, and therefore whether it is worth one more push.
+      state = `${gone} breaking`;
       stateClass = 'pinned';
     } else if (pinned) {
       state = 'pinned';
@@ -185,6 +189,15 @@ export class Hud {
     } else if (u.state === UnitState.Down) {
       tag = u.stabilized ? 'STABLE' : 'BLEEDING';
       tagClass = 'down';
+    } else if (u.nerveState === Nerve.Broken) {
+      // Above everything he might be doing with his body, because a man who
+      // has stopped fighting is the one thing on this card the player cannot
+      // read off the battlefield, and the one he has to react to.
+      tag = 'BROKEN';
+      tagClass = 'broken';
+    } else if (u.nerveState === Nerve.Wavering) {
+      tag = 'SHAKEN';
+      tagClass = 'shaken';
     } else if (u.posture === Posture.Prone) {
       // Not "down": that word already means a casualty on this card.
       tag = 'PRONE';

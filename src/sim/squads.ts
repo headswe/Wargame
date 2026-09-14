@@ -1,8 +1,8 @@
 import { type Vec2, angleOf, dist, fromAngle, normalize, sub, vec } from './math.ts';
 import type { Scene } from './world/scene.ts';
 import { Stature } from './world/occlusion.ts';
-import { type Morale, freshMorale } from './morale.ts';
-import { Faction, MoveMode, UnitState, type Unit } from './units.ts';
+import { type SquadMorale, freshMorale, willFollow } from './morale.ts';
+import { type Faction, MoveMode, type Unit } from './units.ts';
 
 export interface SquadOrder {
   dest: Vec2;
@@ -20,8 +20,8 @@ export interface Squad {
   order: SquadOrder | null;
   /** Direction the squad believes danger lies in. Drives every cover choice. */
   threatDir: Vec2;
-  /** How it is holding up, as opposed to how hard it is being shot at. */
-  morale: Morale;
+  /** How it is holding up, summed from the men. Read-only: nerve is theirs. */
+  morale: SquadMorale;
 }
 
 export { freshMorale };
@@ -114,9 +114,12 @@ export function planSlots(
   units: Map<number, Unit>,
   order: SquadOrder,
 ): SquadPlan {
+  // Only the men who would actually go. A broken man is not listening and a
+  // shaken one will not be walked forward, so planning them a fighting position
+  // would draw the player a line to ground nobody is going to hold.
   const members = squad.memberIds
     .map((id) => units.get(id))
-    .filter((u): u is Unit => !!u && u.state === UnitState.Active);
+    .filter((u): u is Unit => !!u && willFollow(u, order.dest));
   const threatDir = resolveThreatDir(squad, order, members);
   if (members.length === 0) return { threatDir, slots: [] };
 
@@ -169,23 +172,31 @@ export function planSlots(
   return { threatDir, slots };
 }
 
-/** Apply a plan. The only thing in here that writes to a unit. */
+/**
+ * Apply a plan. The only thing in here that writes to a unit.
+ *
+ * Returns the men who took it, which may be fewer than the team has — an order
+ * a team only half obeys is a thing the caller needs to be able to say.
+ */
 export function assignSlots(
   scene: Scene,
   squad: Squad,
   units: Map<number, Unit>,
   order: SquadOrder,
-): void {
+): Unit[] {
   const plan = planSlots(scene, squad, units, order);
   squad.threatDir = plan.threatDir;
 
+  const moved: Unit[] = [];
   for (const slot of plan.slots) {
     const u = units.get(slot.unitId);
     if (!u) continue;
     u.coverSpot = null;
     u.slot = { ...slot.pos };
     u.postFacing = order.mode === MoveMode.Sprint ? order.facing : slot.facing;
+    moved.push(u);
   }
+  return moved;
 }
 
 /** What a given patch of ground costs an operator who stands on it. */

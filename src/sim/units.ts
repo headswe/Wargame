@@ -39,6 +39,16 @@ export const Posture = {
 } as const;
 export type Posture = (typeof Posture)[keyof typeof Posture];
 
+export const Nerve = {
+  /** Fighting. */
+  Steady: 0,
+  /** Still fighting, worse, and unwilling to give up any more ground. */
+  Wavering: 1,
+  /** Out of the fight: getting out, not shooting, not taking orders. */
+  Broken: 2,
+} as const;
+export type Nerve = (typeof Nerve)[keyof typeof Nerve];
+
 export interface Weapon {
   name: string;
   damage: number;
@@ -206,10 +216,23 @@ export interface Unit {
   throwCooldown: number;
   /** Breaking cover to get away from a live one, rather than following orders. */
   diving: boolean;
-  /** His squad's nerve, mirrored here so combat need not look up a squad. */
+  /** How he personally is holding up, 1 steady down to 0 finished. */
   nerve: number;
+  /** What that adds up to. His own, not his team's. */
+  nerveState: Nerve;
+  /** Earliest sim time a broken man will listen to anyone again. */
+  rallyAt: number;
+  /** Where he is running to, once he has stopped fighting. */
+  refuge: Vec2 | null;
   /** He has stopped fighting and is getting out. Overrides being pinned. */
   routing: boolean;
+  /**
+   * Whether the fight has ever had him on his feet.
+   *
+   * A body that was already lying there when the shooting started is scenery.
+   * Only a man his mates had seen standing is news when he goes down.
+   */
+  wasStanding: boolean;
 
   // Area fire
   /** Ground being raked when there is nothing in sight worth shooting at. */
@@ -287,7 +310,11 @@ export function makeUnit(opts: {
     throwCooldown: 0,
     diving: false,
     nerve: 1,
+    nerveState: Nerve.Steady,
+    rallyAt: 0,
+    refuge: null,
     routing: false,
+    wasStanding: false,
     suppressAt: null,
     suppressUntil: 0,
     suppressOrdered: false,

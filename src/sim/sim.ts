@@ -15,7 +15,7 @@ import {
   type InFlight, Ordnance, launch, pickThrower, resetOrdnanceIds, spend, stockOf,
   updateOrdnance,
 } from './ordnance.ts';
-import { type SimContext, updateSquad, updateUnit } from './ai.ts';
+import { type SimContext, updateCasualties, updateSquad, updateUnit } from './ai.ts';
 
 export const MissionState = { InProgress: 0, Won: 1, Lost: 2 } as const;
 export type MissionState = (typeof MissionState)[keyof typeof MissionState];
@@ -138,11 +138,11 @@ export class Sim implements SimContext {
    * The defence, as a handful of positions rather than one fourteen-man block.
    *
    * Grouping by proximity is not cosmetic. A single squad shares contacts, so
-   * one sentry seeing you told the entire village at once; and morale is held
-   * per squad, so fourteen men in one would lose their nerve simultaneously,
-   * which is neither how it works nor any fun to fight. Broken into groups,
-   * each position sees for itself and breaks for itself, and taking a village
-   * becomes taking one position at a time.
+   * one sentry seeing you told the entire village at once. Nerve is a man's
+   * own, so a position no longer breaks as a block either, but a squad is
+   * still what pools sightings and what the player reads off a card. Broken
+   * into groups, each position sees for itself, and taking a village becomes
+   * taking one position at a time.
    */
   private spawnHostiles(): void {
     let index = 0;
@@ -250,24 +250,33 @@ export class Sim implements SimContext {
     return squad.memberIds.map((id) => this.units.get(id)).filter((u): u is Unit => !!u);
   }
 
-  /** The player's only verb: send a team somewhere, at a tempo, facing a way. */
+  /**
+   * The player's only verb: send a team somewhere, at a tempo, facing a way.
+   *
+   * The order goes to whoever is still taking orders. Men who have broken are
+   * not listening — getting them back is a matter of giving them somewhere
+   * quiet to be, not of telling them again — and shaken men will not be walked
+   * any closer to what is shooting at them. Returns false only when nobody at
+   * all moved, so a half-obeyed order still counts as given and the player
+   * watches three men go and the fourth stay put.
+   */
   orderSquad(squadId: number, dest: Vec2, mode: MoveMode, facing: number | null): boolean {
     const squad = this.squads[squadId];
     if (!squad || squad.faction !== Faction.Player) return false;
-    // Men who have broken are not listening. Getting them back is a matter of
-    // giving them somewhere quiet to be, not of telling them again.
-    if (squad.morale.state === Nerve.Broken) return false;
 
     const order: SquadOrder = { dest: { ...dest }, mode, facing, issuedAt: this.time };
+    const moved = assignSlots(this.scene, squad, this.units, order);
+    if (moved.length === 0) return false;
+
     squad.order = order;
-    // Being told to go somewhere ends being told to hold and shoot.
-    this.ceaseFire(squadId);
-    for (const u of this.membersOf(squad)) {
+    for (const u of moved) {
+      // Being told to go somewhere ends being told to hold and shoot.
+      u.suppressAt = null;
+      u.suppressOrdered = false;
       u.moveMode = mode;
       u.path.length = 0;
       u.pathIndex = 0;
     }
-    assignSlots(this.scene, squad, this.units, order);
     return true;
   }
 
@@ -343,16 +352,6 @@ export class Sim implements SimContext {
     return any;
   }
 
-  /** Stop raking. Any fresh movement order implies it. */
-  ceaseFire(squadId: number): void {
-    const squad = this.squads[squadId];
-    if (!squad) return;
-    for (const u of this.membersOf(squad)) {
-      u.suppressAt = null;
-      u.suppressOrdered = false;
-    }
-  }
-
   /** What the team has left, for the HUD and for deciding whether to offer it. */
   stock(squadId: number, kind: Ordnance): number {
     const squad = this.squads[squadId];
@@ -376,6 +375,9 @@ export class Sim implements SimContext {
       if (u.throwCooldown > 0) u.throwCooldown -= dt;
     }
 
+    // Who went down is settled before anyone's nerve is, so the men beside a
+    // casualty feel it on the same tick they have to decide what to do about it.
+    updateCasualties(this);
     for (const squad of this.squads) updateSquad(this, squad, dt);
     for (const u of this.unitList) updateUnit(this, u, dt);
 
@@ -403,7 +405,7 @@ export class Sim implements SimContext {
     const holding = this.unitList.some(
       (u) => u.faction === Faction.Hostile
         && u.state === UnitState.Active
-        && this.squads[u.squadId]?.morale.state !== Nerve.Broken,
+        && u.nerveState !== Nerve.Broken,
     );
     const onObjective = this.unitList.some(
       (u) =>
@@ -512,8 +514,8 @@ function clusterSpawns(
     groups.push(group);
   }
 
-  // Nobody is left on his own. A man alone is not a position, he cannot break
-  // as a team, and losing his nerve is not an event worth modelling.
+  // Nobody is left on his own. A man alone is not a position: he sees for
+  // himself, shares his sightings with nobody, and breaks almost at once.
   for (let i = groups.length - 1; i >= 0; i--) {
     if (groups[i].length > 1 || groups.length === 1) continue;
     const orphan = groups[i][0];
