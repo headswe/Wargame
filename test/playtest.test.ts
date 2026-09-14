@@ -8,7 +8,7 @@ import { MoveMode } from '../src/sim/units.ts';
 import { Scene } from '../src/sim/world/scene.ts';
 import { Terrain } from '../src/sim/world/terrain.ts';
 import { Fabric, Solidity, Structures } from '../src/sim/world/geometry.ts';
-import { building } from '../src/sim/world/builder.ts';
+import { building, rect } from '../src/sim/world/builder.ts';
 import { Stature } from '../src/sim/world/occlusion.ts';
 import { buildNavigation } from '../src/sim/nav/build.ts';
 
@@ -60,7 +60,7 @@ test('a steep bank is crossed but a steep hill is not', () => {
 
 test('a sealed building is sealed from every direction and range', () => {
   const scene = new Scene(120, 120);
-  building(scene, { centre: vec(60, 60), width: 14, depth: 10, angle: 0.37, openings: [] });
+  building(scene, { footprint: rect(vec(60, 60), 14, 10, 0.37), openings: [] });
   scene.bake();
 
   // Deliberately awkward: an odd angle, so lines cross the walls at every

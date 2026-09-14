@@ -66,3 +66,46 @@ export function distPointToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   t = clamp(t, 0, 1);
   return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
 }
+
+/**
+ * A smooth path through the given control points, sampled every `step` metres.
+ *
+ * Roads, ditches and hedgerows are drawn as a handful of points, and a straight
+ * polyline through them corners like a railway siding — the kink gets carved
+ * into the heightfield as a crease you can see from the far side of the map.
+ * Catmull-Rom passes through every point the author placed while curving
+ * between them, so what ends up in the ground is the road he meant rather than
+ * the vertices he could be bothered to type.
+ *
+ * The ends are held by duplicating the first and last points, which makes the
+ * curve leave and arrive along the direction of its own first and last span
+ * instead of flicking outward.
+ */
+export function spline(points: Vec2[], step = 1): Vec2[] {
+  if (points.length < 3) return points.map(clone);
+
+  const at = (i: number): Vec2 => points[i < 0 ? 0 : i >= points.length ? points.length - 1 : i];
+  const out: Vec2[] = [clone(points[0])];
+
+  for (let i = 0; i + 1 < points.length; i++) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    const pieces = Math.max(1, Math.ceil(dist(p1, p2) / step));
+    for (let k = 1; k <= pieces; k++) {
+      const t = k / pieces;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push({
+        x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t
+          + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2
+          + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t
+          + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2
+          + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  return out;
+}

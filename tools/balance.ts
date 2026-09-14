@@ -32,10 +32,26 @@ interface Step {
 const step = (t: number, squad: number, x: number, y: number, mode: MoveMode): Step =>
   ({ t, squad, x, y, mode });
 
+/**
+ * Every plan has to try to take the same place.
+ *
+ * This is the correction that matters most in here. The three scripts used to
+ * stop at different distances — the charge ran the whole way in while the two
+ * careful plans halted halfway — so the only comparable number was who was left
+ * standing, and that one is won by refusing to go. A plan that keeps twelve men
+ * alive eighty metres short has not beaten one that loses six taking the
+ * ground, and until all three are pointed at the objective the harness cannot
+ * tell the difference.
+ */
+const OBJECTIVE = { x: 94, y: 14 };
+
 /** Straight up the middle at a run. The way you are not supposed to do it. */
 const FRONTAL: Step[] = [];
 for (const [t, y] of [[0, 100], [16, 86], [30, 70], [46, 50], [62, 30]] as const) {
   for (const squad of [0, 1, 2]) FRONTAL.push(step(t, squad, 80 + squad * 8, y, MoveMode.Sprint));
+}
+for (const squad of [0, 1, 2]) {
+  FRONTAL.push(step(80, squad, OBJECTIVE.x + (squad - 1) * 7, OBJECTIVE.y + 5, MoveMode.Sprint));
 }
 
 /** Base of fire in the middle, flanks bounding forward under it. */
@@ -50,6 +66,14 @@ const BOUNDING: Step[] = [
   step(48, 2, 132, 78, MoveMode.Tactical),
   step(66, 1, 86, 79, MoveMode.Tactical),
   step(84, 0, 40, 64, MoveMode.Tactical),
+  step(84, 2, 132, 62, MoveMode.Tactical),
+  step(102, 1, 86, 66, MoveMode.Tactical),
+  step(116, 0, 44, 46, MoveMode.Tactical),
+  step(116, 2, 128, 46, MoveMode.Tactical),
+  step(136, 1, 90, 52, MoveMode.Tactical),
+  step(152, 0, 78, 26, MoveMode.Tactical),
+  step(152, 2, 112, 26, MoveMode.Tactical),
+  step(170, 1, OBJECTIVE.x, OBJECTIVE.y + 5, MoveMode.Tactical),
 ];
 
 /** What the briefing actually tells you to do: cross inside the ditch. */
@@ -62,12 +86,19 @@ const DITCH: Step[] = [
   step(56, 1, 86, 66, MoveMode.Tactical),
   step(72, 0, 64, 62, MoveMode.Tactical),
   step(72, 2, 106, 60, MoveMode.Tactical),
+  step(90, 1, 86, 56, MoveMode.Tactical),
+  step(106, 0, 60, 44, MoveMode.Tactical),
+  step(106, 2, 110, 44, MoveMode.Tactical),
+  step(126, 1, 88, 42, MoveMode.Tactical),
+  step(144, 0, 78, 24, MoveMode.Tactical),
+  step(144, 2, 112, 24, MoveMode.Tactical),
+  step(162, 1, OBJECTIVE.x, OBJECTIVE.y + 5, MoveMode.Tactical),
 ];
 
 const PLANS: Record<string, Step[]> = { frontal: FRONTAL, bounding: BOUNDING, ditch: DITCH };
 
 const SEEDS = [1009, 2213, 4242, 7717, 9001];
-const DURATION = 115;
+const DURATION = 200;
 const DT = 0.05;
 
 interface Result {
@@ -99,6 +130,17 @@ interface Result {
   defendersBroke: number;
   /** Whether the plan actually took the place, which survivors do not say. */
   won: number;
+  /**
+   * How close the attack actually got to the objective, in metres.
+   *
+   * Survivors on their own stopped being a usable score once men started
+   * refusing to finish a plan: a charge that breaks at eighty metres brings
+   * more men home than one that presses on, and reads as the better plan.
+   * Ground gained cannot be won by not going.
+   */
+  closest: number;
+  /** Operators still on their feet within twenty-five metres of it at the end. */
+  onTheObjective: number;
 }
 
 function play(plan: Step[], seed: number): Result {
@@ -112,7 +154,7 @@ function play(plan: Step[], seed: number): Result {
     operatorsUp: 0, defendersUp: 0, playerRounds: 0, aimedRounds: 0, blindRounds: 0,
     reachSeconds: 0, acquiredSeconds: 0, outOfRangeSeconds: 0, noLineSeconds: 0,
     underFire: 0, pinnedSeconds: 0, defendersWhoFired: 0,
-    operatorsBroke: 0, defendersBroke: 0, won: 0,
+    operatorsBroke: 0, defendersBroke: 0, won: 0, closest: Infinity, onTheObjective: 0,
   };
   const broke = new Set<number>();
 
@@ -151,6 +193,11 @@ function play(plan: Step[], seed: number): Result {
 
     for (const u of sim.unitList) {
       if (u.state === UnitState.Active && u.nerveState === Nerve.Broken) broke.add(u.id);
+    }
+    for (const p of players) {
+      if (p.state !== UnitState.Active) continue;
+      const d = dist(p.pos, sim.objective);
+      if (d < r.closest) r.closest = d;
     }
 
     // Sampled at 1 Hz: a sightline per defender per player is not free, and
@@ -196,6 +243,10 @@ function play(plan: Step[], seed: number): Result {
   r.operatorsBroke = players.filter((p) => broke.has(p.id)).length;
   r.defendersBroke = hostiles.filter((h) => broke.has(h.id)).length;
   r.won = sim.missionState === MissionState.Won ? 1 : 0;
+  r.onTheObjective = players.filter(
+    (p) => p.state === UnitState.Active && dist(p.pos, sim.objective) < 25,
+  ).length;
+  if (!Number.isFinite(r.closest)) r.closest = Infinity;
   void startingAmmo;
   return r;
 }
@@ -220,11 +271,12 @@ for (const name of names) {
 const pad = (s: string, n: number) => s.padEnd(n);
 const num = (v: number, n = 5, digits = 1) => v.toFixed(digits).padStart(n);
 
-console.log(`Stepove, ${SEEDS.length} seeds, ${DURATION}s each. 12 operators, 14 defenders.\n`);
+console.log(`Stepove, ${SEEDS.length} seeds, ${DURATION}s each, all three plans aiming at the objective. 12 operators, 14 defenders.\n`);
 console.log(
   `${pad('plan', 9)} ${pad('operators', 10)} ${pad('defenders', 10)} ` +
   `${pad('rounds P/H', 12)} ${pad('blind', 6)} ${pad('reach', 7)} ` +
-  `${pad('acq', 6)} ${pad('underfire', 10)} ${pad('shooters', 9)} ${pad('broke P/H', 10)} won`,
+  `${pad('acq', 6)} ${pad('underfire', 10)} ${pad('shooters', 9)} ${pad('broke P/H', 10)} ` +
+  `${pad('closest', 8)} ${pad('on obj', 7)} won`,
 );
 for (const [name, runs] of totals) {
   const up = mean(runs.map((x) => x.operatorsUp));
@@ -241,11 +293,14 @@ for (const [name, runs] of totals) {
   const brokeP = mean(runs.map((x) => x.operatorsBroke));
   const brokeH = mean(runs.map((x) => x.defendersBroke));
   const won = runs.reduce((a, x) => a + x.won, 0);
+  const closest = mean(runs.map((x) => x.closest));
+  const onObj = mean(runs.map((x) => x.onTheObjective));
   console.log(
     `${pad(name, 9)} ${num(up, 4)}/12   ${num(def, 4)}/14   ` +
     `${num(pr, 4, 0)}/${num(hr, 4, 0)}   ${num(blind, 4, 0)}  ${num(reach, 5, 0)}s  ` +
     `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/14   ` +
-    `${num(brokeP, 4)}/${num(brokeH, 4)}  ${won}/${runs.length}  ` +
+    `${num(brokeP, 4)}/${num(brokeH, 4)}  ${num(closest, 5)}m  ${num(onObj, 4)}/12  ` +
+    `${won}/${runs.length}  ` +
     `| no shot: ${num(far, 4, 0)}s too far, ${num(blind2, 4, 0)}s no line`,
   );
 }
@@ -254,10 +309,15 @@ const bounding = totals.get('bounding');
 const frontal = totals.get('frontal');
 if (bounding && frontal) {
   const gap = mean(bounding.map((x) => x.operatorsUp)) - mean(frontal.map((x) => x.operatorsUp));
-  console.log(`\nskill gradient (bounding minus frontal): ${gap.toFixed(1)} operators`);
+  const ground = mean(frontal.map((x) => x.closest)) - mean(bounding.map((x) => x.closest));
+  console.log(
+    `\nskill gradient (bounding minus frontal): ${gap.toFixed(1)} operators, ` +
+    `${ground.toFixed(0)}m of ground`,
+  );
 }
 console.log(
   '\nreach = defender-seconds with a target in range and in view;' +
   ' acq = of those, actually acquired;' +
-  '\nbroke = men who lost their nerve at some point, counted one at a time.',
+  '\nbroke = men who lost their nerve at some point, counted one at a time;' +
+  '\nclosest = how near the objective anybody still standing actually got.',
 );

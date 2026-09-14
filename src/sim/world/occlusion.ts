@@ -47,6 +47,18 @@ export class OcclusionField {
   readonly blockTop: Float32Array;
   /** World height of the top of solid geometry, or -Infinity where there is none. */
   readonly solidTop: Float32Array;
+  /**
+   * World height of the *underside* of anything solid floating above the gap —
+   * a lintel over a window or a door — or +Infinity where the air is open.
+   *
+   * The waterline solver below answers "how low can I see", which is the right
+   * question for walls, crests and ditch lips because all of those stand on the
+   * ground. A lintel does not: it hides the top of a target rather than the
+   * bottom. Keeping its underside in its own array lets the same walk solve for
+   * a ceiling as well, and that is what turns a window from a full-height slot
+   * in a wall into an opening you can actually shoot through.
+   */
+  readonly spanBase: Float32Array;
   /** World height of the top of vegetation, or -Infinity. */
   readonly coverTop: Float32Array;
   /** 0..1 density of whatever is growing there. */
@@ -62,6 +74,7 @@ export class OcclusionField {
     this.rows = Math.ceil(height / cellSize);
     this.blockTop = new Float32Array(this.cols * this.rows);
     this.solidTop = new Float32Array(this.cols * this.rows).fill(-Infinity);
+    this.spanBase = new Float32Array(this.cols * this.rows).fill(Infinity);
     this.coverTop = new Float32Array(this.cols * this.rows).fill(-Infinity);
     this.density = new Float32Array(this.cols * this.rows);
     this.segmentAt = new Int32Array(this.cols * this.rows).fill(-1);
@@ -89,6 +102,7 @@ export class OcclusionField {
       for (let i = i0; i <= i1; i++) {
         const k = j * this.cols + i;
         this.solidTop[k] = -Infinity;
+        this.spanBase[k] = Infinity;
         this.coverTop[k] = -Infinity;
         this.density[k] = 0;
         this.segmentAt[k] = -1;
@@ -143,10 +157,18 @@ export class OcclusionField {
         if (Math.hypot(x - (segment.a.x + abx * t), y - (segment.a.y + aby * t)) > half) continue;
 
         const k = j * this.cols + i;
-        const top = terrain.heightAt(x, y) + segment.top;
+        const ground = terrain.heightAt(x, y);
+        const top = ground + segment.top;
         if (concealing) {
           if (top > this.coverTop[k]) this.coverTop[k] = top;
           this.density[k] = Math.max(this.density[k], 0.75);
+        } else if (segment.sill > 0) {
+          // A lintel. It stands on nothing, so it cannot raise the waterline;
+          // what it does is put a lid on how high you can see through the gap
+          // underneath it. Its own top is not worth recording: above a lintel
+          // is more wall, all the way to the roof.
+          const base = ground + segment.sill;
+          if (base < this.spanBase[k]) this.spanBase[k] = base;
         } else if (top > this.solidTop[k]) {
           this.solidTop[k] = top;
           this.segmentAt[k] = segment.id;
@@ -235,6 +257,13 @@ export interface Target {
  * One pass therefore answers both questions at once, and a wall, a crest, a
  * ditch lip and a crouching man all become the same arithmetic. That is the
  * point — cover stops being a table of special cases and becomes geometry.
+ *
+ * Anything hanging rather than standing — the lintel over a window or a door —
+ * is the same equation upside down. A span whose underside is B at fraction t
+ * hides everything *above* eye + (B - eye) / t, so the walk carries a ceiling
+ * alongside the waterline and the target is exposed between the two. Without
+ * it a window has to be a slot cut from the sill to the roof, which is why the
+ * openings in these buildings have always looked like missing teeth.
  */
 export function sightline(
   terrain: Terrain,
@@ -256,9 +285,10 @@ export function sightline(
   const headH = groundAtTarget + target.top;
 
   let waterline = footH;
+  let ceiling = headH;
   let concealment = 0;
 
-  const { cols, rows, cellSize, blockTop, coverTop, density } = field;
+  const { cols, rows, cellSize, blockTop, spanBase, coverTop, density } = field;
   // Nothing burning anywhere on the map costs one branch, not a second lookup
   // per cell for the whole game.
   const haze = smoke !== null && smoke.active ? smoke : null;
@@ -312,6 +342,17 @@ export function sightline(
         }
       }
 
+      // And the same sum for anything overhead, which caps the target from
+      // above instead of from below.
+      const lid = spanBase[k];
+      if (lid < Infinity) {
+        const allowed = eyeH + (lid - eyeH) / entry;
+        if (allowed < ceiling) {
+          ceiling = allowed;
+          if (ceiling <= waterline) return { visible: false, exposure: 0, concealment, distance };
+        }
+      }
+
       // Vegetation on the line hides without protecting, so it is accumulated
       // separately and never touches the exposure figure. Charged by the length
       // actually travelled inside the cell: a single bush is a nuisance, a
@@ -341,7 +382,7 @@ export function sightline(
   }
 
   const span = headH - footH;
-  const exposure = span <= 1e-6 ? 1 : clamp01((headH - waterline) / span);
+  const exposure = span <= 1e-6 ? 1 : clamp01((ceiling - waterline) / span);
   return {
     visible: exposure > 0,
     exposure,

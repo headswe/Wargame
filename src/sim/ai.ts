@@ -5,6 +5,7 @@ import {
 import type { Rng } from './rng.ts';
 import type { Scene } from './world/scene.ts';
 import { Stature } from './world/occlusion.ts';
+import { SURFACE } from './world/terrain.ts';
 import {
   Faction, MoveMode, Posture, UnitState, type Unit, eyeOf, isMoving, silhouetteOf, speedOf,
 } from './units.ts';
@@ -304,7 +305,8 @@ function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
   const dir = normalize(sub(waypoint, u.pos));
   // Climbing costs you. Gentle ground is free; a steep bank halves your pace.
   const slope = ctx.scene.terrain.slopeAt(u.pos.x, u.pos.y);
-  const speed = speedOf(u) * (1 - clamp(slope * 0.45, 0, 0.5));
+  const ground = SURFACE[ctx.scene.terrain.surfaceAt(u.pos.x, u.pos.y)];
+  const speed = speedOf(u, ground?.footing ?? 1) * (1 - clamp(slope * 0.45, 0, 0.5));
   const sep = separation(ctx, u);
   const vx = dir.x * speed + sep.x;
   const vy = dir.y * speed + sep.y;

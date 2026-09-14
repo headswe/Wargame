@@ -1,4 +1,5 @@
 import { Solidity, Structures } from '../world/geometry.ts';
+import { Stature } from '../world/occlusion.ts';
 import type { Terrain } from '../world/terrain.ts';
 
 export interface VoxelOptions {
@@ -209,6 +210,10 @@ export class WalkableField {
     for (const id of structures.segmentsInBox(minX, minY, maxX, maxY)) {
       const segment = structures.segments[id];
       if (segment.destroyed || segment.solidity === Solidity.Concealment) continue;
+      // A lintel is not an obstacle, it is a thing you walk under. Without this
+      // every doorway that has a wall above it seals the building it is meant
+      // to let you into.
+      if (segment.sill >= Stature.standingTop) continue;
       this.stampSegment(segment.a, segment.b, Math.max(segment.thickness / 2, floor), lo, hi);
     }
 

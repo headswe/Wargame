@@ -359,12 +359,15 @@ export const isMoving = (u: Unit): boolean =>
   u.path.length > 0 && u.pathIndex < u.path.length;
 
 /** Movement speed in tiles/second, after stamina and suppression. */
-export function speedOf(u: Unit): number {
+export function speedOf(u: Unit, footing = 1): number {
   // Loaded infantry, not sprinters. The gap between these two numbers is the
   // whole tempo decision, and the sprint has to stay slow enough that crossing
   // open ground is genuinely exposed rather than a teleport.
   const base = u.moveMode === MoveMode.Sprint ? 5.0 : 2.2;
   const staminaFactor = u.moveMode === MoveMode.Sprint ? 0.55 + u.stamina * 0.45 : 1;
   const supFactor = 1 - u.suppression * 0.45;
-  return base * staminaFactor * supFactor;
+  // What is underfoot. A road is the quickest way across a map and the most
+  // exposed one; a ploughed field or the mud in the bottom of a ditch is slow
+  // enough that taking it is a decision. Without this a surface is a colour.
+  return base * staminaFactor * supFactor * footing;
 }

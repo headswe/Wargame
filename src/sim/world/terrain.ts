@@ -1,6 +1,6 @@
-import { type Vec2, clamp, distPointToSegment } from '../math.ts';
+import { type Vec2, clamp, distPointToSegment, spline } from '../math.ts';
 
-/** Surface materials. Cosmetic, plus a small effect on movement. */
+/** What the ground underfoot is made of. */
 export const Surface = {
   Dirt: 0,
   Grass: 1,
@@ -9,8 +9,47 @@ export const Surface = {
   Gravel: 4,
   Concrete: 5,
   Mud: 6,
+  Rubble: 7,
+  Sand: 8,
+  Water: 9,
 } as const;
 export type Surface = (typeof Surface)[keyof typeof Surface];
+
+/**
+ * What each one does to a man walking on it.
+ *
+ * `footing` multiplies his speed, and that is the whole reason a surface is not
+ * just a colour. A road is the fastest way across a map and the most exposed;
+ * a ploughed field or a flooded ditch is slow enough that choosing it is a
+ * decision rather than a texture. `going` is how hard it is to do quietly and
+ * feeds nothing yet — it is here so that noise has somewhere to read from when
+ * it arrives, rather than every surface needing revisiting then.
+ */
+export const SURFACE: Record<number, { footing: number; going: number }> = {
+  [Surface.Dirt]: { footing: 1.0, going: 1.0 },
+  [Surface.Grass]: { footing: 0.98, going: 0.8 },
+  [Surface.Crop]: { footing: 0.86, going: 1.3 },
+  [Surface.Road]: { footing: 1.12, going: 1.2 },
+  [Surface.Gravel]: { footing: 1.02, going: 1.6 },
+  [Surface.Concrete]: { footing: 1.1, going: 1.3 },
+  [Surface.Mud]: { footing: 0.72, going: 1.1 },
+  [Surface.Rubble]: { footing: 0.68, going: 1.8 },
+  [Surface.Sand]: { footing: 0.82, going: 0.7 },
+  [Surface.Water]: { footing: 0.55, going: 2.0 },
+};
+
+/** Common options for the linear ground features: ditches, banks and roads. */
+export interface ShapeOptions {
+  /** Paint the ground it lands on as well as reshaping it. */
+  surface?: Surface;
+  /**
+   * Treat the points as a curve rather than as corners. On by default, because
+   * a ditch or a road that turns a hard corner reads as a modelling mistake
+   * from anywhere on the map, and nobody wants to type forty control points to
+   * avoid one.
+   */
+  curve?: boolean;
+}
 
 export interface Bounds {
   minX: number;
@@ -159,11 +198,13 @@ export class Terrain {
    * usable: you can stand in it below the line of fire rather than scrambling
    * about on a V.
    */
-  cut(path: Vec2[], width: number, depth: number, surface?: Surface): this {
+  cut(path: Vec2[], width: number, depth: number, options: ShapeOptions = {}): this {
+    const { surface, curve = true } = options;
+    const line = curve ? spline(path, Math.max(1, width / 2)) : path;
     const half = width / 2;
     const floor = half * 0.45;
-    this.forEachNear(path, half + 1, (i, j, x, y) => {
-      const d = this.distanceToPath(path, x, y);
+    this.forEachNear(line, half + 1, (i, j, x, y) => {
+      const d = this.distanceToPath(line, x, y);
       if (d > half) return;
       const t = d <= floor ? 1 : 0.5 + 0.5 * Math.cos(((d - floor) / (half - floor)) * Math.PI);
       const index = this.index(i, j);
@@ -174,10 +215,12 @@ export class Terrain {
   }
 
   /** Raise a bank — a berm, a railway embankment, a spoil heap. */
-  bank(path: Vec2[], width: number, rise: number, surface?: Surface): this {
+  bank(path: Vec2[], width: number, rise: number, options: ShapeOptions = {}): this {
+    const { surface, curve = true } = options;
+    const line = curve ? spline(path, Math.max(1, width / 2)) : path;
     const half = width / 2;
-    this.forEachNear(path, half + 1, (i, j, x, y) => {
-      const d = this.distanceToPath(path, x, y);
+    this.forEachNear(line, half + 1, (i, j, x, y) => {
+      const d = this.distanceToPath(line, x, y);
       if (d > half) return;
       const index = this.index(i, j);
       this.heights[index] += rise * (0.5 + 0.5 * Math.cos((d / half) * Math.PI));
@@ -191,7 +234,9 @@ export class Terrain {
    * along its length. Sampling the centreline first is what stops it
    * bulldozing the hill it runs over.
    */
-  road(path: Vec2[], width: number, surface: Surface = Surface.Road): this {
+  road(path: Vec2[], width: number, options: ShapeOptions = {}): this {
+    const { surface = Surface.Road, curve = true } = options;
+    path = curve ? spline(path, Math.max(1, width / 2)) : path;
     const half = width / 2;
     // Sample the centreline at road resolution, not at the author's vertices.
     // Interpolating between two far-apart vertices is how a road ends up
@@ -209,6 +254,56 @@ export class Terrain {
       this.heights[index] = this.heights[index] * (1 - k) + target * k;
       if (distance <= half) this.surface[index] = surface;
     });
+    return this;
+  }
+
+  /**
+   * Lay down a whole surface at once from a coarse control grid.
+   *
+   * The procedural operations below compose a landscape out of verbs — roll
+   * this, mound that, cut a ditch through it — which is excellent for ground
+   * that has a tactical job to do and hopeless for ground that just has to look
+   * like somewhere. A control grid is the other half: an author (or, later, an
+   * editor, or an imported real heightfield) hands over the shape he wants and
+   * this resamples it onto the simulation's much finer field.
+   *
+   * Sampling is bilinear with a smoothstep on each axis, which costs nothing
+   * and is the difference between rolling ground and a lampshade: straight
+   * bilinear leaves a visible crease along every control-grid line, because the
+   * surface is continuous but its slope is not.
+   */
+  heightmap(
+    grid: { cols: number; rows: number; heights: ArrayLike<number> },
+    options: { scale?: number; base?: number; blend?: 'set' | 'add' } = {},
+  ): this {
+    const { cols, rows, heights } = grid;
+    if (cols < 2 || rows < 2) return this;
+    const scale = options.scale ?? 1;
+    const base = options.base ?? 0;
+    const add = options.blend === 'add';
+
+    const sample = (u: number, v: number): number => {
+      const gx = clamp(u * (cols - 1), 0, cols - 1);
+      const gy = clamp(v * (rows - 1), 0, rows - 1);
+      const i = Math.min(cols - 2, Math.floor(gx));
+      const j = Math.min(rows - 2, Math.floor(gy));
+      const fx = smoothstep(gx - i);
+      const fy = smoothstep(gy - j);
+      const h00 = heights[j * cols + i];
+      const h10 = heights[j * cols + i + 1];
+      const h01 = heights[(j + 1) * cols + i];
+      const h11 = heights[(j + 1) * cols + i + 1];
+      return (h00 * (1 - fx) + h10 * fx) * (1 - fy) + (h01 * (1 - fx) + h11 * fx) * fy;
+    };
+
+    for (let j = 0; j < this.rows; j++) {
+      for (let i = 0; i < this.cols; i++) {
+        const h = base + scale * sample(i / (this.cols - 1), j / (this.rows - 1));
+        const index = this.index(i, j);
+        this.heights[index] = add ? this.heights[index] + h : h;
+      }
+    }
+    this.mark(0, 0, this.width, this.height);
     return this;
   }
 
@@ -321,4 +416,8 @@ export class Terrain {
     }
     return best;
   }
+}
+
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
 }
