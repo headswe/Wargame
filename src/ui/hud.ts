@@ -185,6 +185,10 @@ export class Hud {
     } else if (u.state === UnitState.Down) {
       tag = u.stabilized ? 'STABLE' : 'BLEEDING';
       tagClass = 'down';
+    } else if (u.posture === Posture.Prone) {
+      // Not "down": that word already means a casualty on this card.
+      tag = 'PRONE';
+      tagClass = '';
     } else if (u.posture === Posture.Pinned) {
       tag = 'PINNED';
       tagClass = 'pinned';

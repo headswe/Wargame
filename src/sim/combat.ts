@@ -72,6 +72,10 @@ function rangeFactor(d: number, optimal: number, max: number): number {
 
 function shooterStanceFactor(u: Unit): number {
   if (isMoving(u)) return u.moveMode === MoveMode.Sprint ? 0 : 0.5;
+  // Prone is the steadiest firing position there is, and it gets credit for
+  // that. What it costs a man is not his aim but his eyeline, and the sightline
+  // already charges him for that without help.
+  if (u.posture === Posture.Prone) return 1.2;
   return u.posture === Posture.Crouched ? 1.12 : 1;
 }
 
@@ -120,7 +124,15 @@ export function hitChance(scene: Scene, shooter: Unit, target: Unit): HitBreakdo
   // A shaken team shoots worse than a steady one holding the same wall, which
   // is what makes fire that never kills anybody still worth sending.
   p *= 0.6 + 0.4 * shooter.nerve;
-  p *= sighting.exposure;
+  // How much of a man is showing, in metres rather than as a fraction of
+  // himself. Exposure alone says what share of his silhouette clears the cover
+  // in front of him, which is the right question behind a wall and the wrong
+  // one in the open: a man flat on his face out in a field is fully exposed by
+  // that measure and therefore exactly as easy to hit as one standing up.
+  // Scaling by the height actually presented restores the thing every soldier
+  // knows — that getting small is worth something wherever you are — and it is
+  // what makes going prone a decision rather than a decoration.
+  p *= (silhouetteOf(target) * sighting.exposure) / Stature.standingTop;
   p *= targetMotionFactor(target);
   // Foliage and smoke do not stop a round, but they do stop you aiming at what
   // is behind them. Near-total concealment leaves firing into it and hoping,

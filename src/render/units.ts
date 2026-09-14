@@ -198,8 +198,11 @@ export class UnitViews {
       return;
     }
 
+    // The player has to be able to read posture at a glance, because it is now
+    // the difference between a man who is hard to hit and one who is not.
     let crouch = 1;
-    if (unit.posture === Posture.Pinned) crouch = 0.58;
+    if (unit.posture === Posture.Pinned) crouch = 0.42;
+    else if (unit.posture === Posture.Prone) crouch = 0.5;
     else if (unit.posture === Posture.Crouched) crouch = 0.76;
 
     view.body.rotation.z = 0;

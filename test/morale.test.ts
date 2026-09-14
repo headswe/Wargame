@@ -6,6 +6,10 @@ import { type LevelDef } from '../src/sim/levels.ts';
 import { MissionState, Sim } from '../src/sim/sim.ts';
 import { Faction, MoveMode, UnitState, WEAPONS, makeUnit, resetUnitIds } from '../src/sim/units.ts';
 import { Nerve, freshMorale, updateMorale } from '../src/sim/morale.ts';
+import { Posture } from '../src/sim/units.ts';
+import { updatePosture } from '../src/sim/ai.ts';
+import { hitChance } from '../src/sim/combat.ts';
+import { Scene } from '../src/sim/world/scene.ts';
 import { revetment } from '../src/sim/world/builder.ts';
 import { Fabric } from '../src/sim/world/geometry.ts';
 
@@ -204,5 +208,62 @@ test('a broken team stops taking orders until it has rallied', () => {
   assert.ok(
     sim.membersOf(alpha).every((u) => u.suppressAt === null),
     'and they are certainly not raking anything',
+  );
+});
+
+test('a man under fire gets flat, and getting flat is worth something', () => {
+  const men = team(1);
+  const u = men[0];
+  u.coverSpot = { ...u.pos };
+
+  u.suppression = 0;
+  updatePosture(u);
+  assert.equal(u.posture, Posture.Crouched, 'settled and unbothered, he takes a knee');
+
+  // Rounds start coming near. He does not wait to be pinned.
+  u.suppression = 0.35;
+  updatePosture(u);
+  assert.equal(u.posture, Posture.Prone, 'he should get down of his own accord');
+  assert.ok(u.suppression < 0.72, 'and well before anything forced him to');
+
+  // It stays until it is genuinely quiet, rather than flickering per round.
+  u.suppression = 0.2;
+  updatePosture(u);
+  assert.equal(u.posture, Posture.Prone);
+  u.suppression = 0.05;
+  updatePosture(u);
+  assert.equal(u.posture, Posture.Crouched, 'and he comes back up when it stops');
+});
+
+test('getting small is worth something even with nothing to hide behind', () => {
+  // The failure this guards against: exposure is a fraction of a silhouette,
+  // so a man flat on his face in an open field is "fully exposed" exactly like
+  // a man standing up, and going prone bought him nothing at all.
+  const scene = new Scene(80, 80);
+  scene.bake();
+  resetUnitIds();
+  const shooter = makeUnit({
+    role: 'Rifleman', faction: Faction.Player, squadId: 0,
+    pos: vec(40, 14), weapon: WEAPONS.carbine,
+  });
+  const target = makeUnit({
+    role: 'Rifleman', faction: Faction.Hostile, squadId: 1,
+    pos: vec(40, 40), weapon: WEAPONS.carbine,
+  });
+  target.exposure = 0.2;
+
+  target.posture = Posture.Standing;
+  const standing = hitChance(scene, shooter, target);
+  target.posture = Posture.Crouched;
+  const crouched = hitChance(scene, shooter, target);
+  target.posture = Posture.Prone;
+  const prone = hitChance(scene, shooter, target);
+
+  assert.equal(standing.exposure, 1, 'there is nothing out there to hide behind');
+  assert.equal(prone.exposure, 1, 'and that is true whatever he does with his body');
+  assert.ok(crouched.chance < standing.chance * 0.8, 'yet crouching still helps');
+  assert.ok(
+    prone.chance < standing.chance * 0.45,
+    `prone ${prone.chance.toFixed(2)} against standing ${standing.chance.toFixed(2)} in the open`,
   );
 });

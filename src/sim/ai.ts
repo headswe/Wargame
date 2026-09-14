@@ -206,13 +206,42 @@ function selectTarget(ctx: SimContext, u: Unit): Unit | null {
   return best;
 }
 
-function updatePosture(u: Unit): void {
+/** Rounds close enough that a man stops standing on ceremony and gets flat. */
+const DROP_AT = 0.28;
+/** And quiet enough that he comes back up onto a knee. */
+const RISE_AT = 0.13;
+
+/**
+ * The ladder a man climbs down as the fire gets worse: standing, crouched,
+ * flat by choice, flat because he has stopped functioning.
+ *
+ * Going prone is not modelled as a penalty with a benefit bolted on. Its cost
+ * is already implicit and exact: an eye at forty centimetres cannot see over
+ * the wall that is protecting it, so the same sightline solve that keeps him
+ * alive is the one that stops him shooting. Safety and blindness are the same
+ * fact, which is the trade these games actually offer.
+ */
+export function updatePosture(u: Unit): void {
   if (u.suppression >= PIN_THRESHOLD) {
     u.posture = Posture.Pinned;
     return;
   }
   if (u.posture === Posture.Pinned && u.suppression > UNPIN_THRESHOLD) return;
-  const settled = u.coverSpot !== null && dist(u.pos, u.coverSpot) < 0.8 && !isMoving(u);
+
+  if (isMoving(u)) {
+    // You get up to move. That is the decision the player is making when he
+    // orders a team forward with rounds in the air.
+    u.posture = Posture.Standing;
+    return;
+  }
+
+  const down = u.posture === Posture.Prone || u.posture === Posture.Pinned;
+  if (u.suppression >= DROP_AT || (down && u.suppression > RISE_AT)) {
+    u.posture = Posture.Prone;
+    return;
+  }
+
+  const settled = u.coverSpot !== null && dist(u.pos, u.coverSpot) < 0.8;
   u.posture = settled ? Posture.Crouched : Posture.Standing;
 }
 
@@ -224,6 +253,7 @@ function updateExposure(u: Unit, dt: number): void {
   let want: number;
   if (u.posture === Posture.Pinned) want = 0.12;
   else if (isMoving(u)) want = u.moveMode === MoveMode.Sprint ? 1 : 0.8;
+  else if (u.posture === Posture.Prone) want = u.burstRemaining > 0 ? 0.55 : 0.2;
   else if (u.burstRemaining > 0) want = 0.9;
   else if (u.posture === Posture.Crouched) want = u.targetId !== null ? 0.45 : 0.25;
   else want = 0.75;
@@ -477,6 +507,10 @@ function updateHostileInitiative(ctx: SimContext, u: Unit): void {
   if (u.faction !== Faction.Hostile) return;
   if (isMoving(u) || u.slot) return;
   if (u.posture === Posture.Pinned) return;
+  // Not while someone is shooting at him. Standing up and walking seven metres
+  // with a sight picture already on you is how a defender dies relocating, and
+  // the right instinct under fire is to get down, not to go for a stroll.
+  if (u.suppression > 0.2 || u.posture === Posture.Prone) return;
 
   const target = u.targetId ? ctx.units.get(u.targetId) : null;
   if (!target) return;

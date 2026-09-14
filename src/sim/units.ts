@@ -26,6 +26,16 @@ export const Posture = {
   Crouched: 1,
   /** Suppressed into the dirt: no shooting, no moving. */
   Pinned: 2,
+  /**
+   * Flat, by choice, because rounds are coming near.
+   *
+   * The distinction from Pinned is the whole point: pinned is something done to
+   * a man, prone is something he decides. Without it he has only two options
+   * under fire — keep shooting and die, or be suppressed hard enough that the
+   * game lies him down for him — and the move that actually saves people in
+   * the games this one is aiming at is simply getting down.
+   */
+  Prone: 3,
 } as const;
 export type Posture = (typeof Posture)[keyof typeof Posture];
 
@@ -294,7 +304,7 @@ export function makeUnit(opts: {
  * shot. Nothing else has to model "leaning" — the geometry does it.
  */
 export function eyeOf(u: Unit): number {
-  const low = u.posture === Posture.Pinned
+  const low = u.posture === Posture.Pinned || u.posture === Posture.Prone
     ? Stature.proneEye
     : u.posture === Posture.Crouched
       ? Stature.crouchedEye
@@ -305,6 +315,12 @@ export function eyeOf(u: Unit): number {
 /** How much of a man there is to hit, given what he is doing. */
 export function silhouetteOf(u: Unit): number {
   if (u.posture === Posture.Pinned) return Stature.proneTop;
+  // A man flat on the ground still lifts his head and shoulders to look, but
+  // the difference between this and crouching is most of why getting down
+  // works at all.
+  if (u.posture === Posture.Prone) {
+    return Stature.proneTop + (Stature.crouchedTop - Stature.proneTop) * u.exposure * 0.5;
+  }
   if (u.posture === Posture.Crouched) {
     return Stature.crouchedTop + (Stature.standingTop - Stature.crouchedTop) * u.exposure * 0.6;
   }
