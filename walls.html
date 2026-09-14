@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wargame — wall look-book</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #10120f; overflow: hidden;
+        font: 12px/1.4 ui-monospace, SF Mono, Menlo, Consolas, monospace; color: #d9e0d6; }
+      canvas { display: block; }
+      #labels { position: fixed; inset: 0; pointer-events: none; }
+      #labels span { position: absolute; transform: translate(-50%, 0);
+        letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px;
+        color: #cfd6cc; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+      #help { position: fixed; left: 12px; bottom: 10px; color: #8a948a; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="labels"></div>
+    <div id="help">drag to orbit &middot; wheel to zoom</div>
+    <script type="module" src="/src/tools/wall-preview.ts"></script>
+  </body>
+</html>

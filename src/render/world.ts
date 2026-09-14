@@ -4,6 +4,7 @@ import type { Scene as SimScene } from '../sim/world/scene.ts';
 import { Surface } from '../sim/world/terrain.ts';
 import type { FogOfWar } from './fog.ts';
 import { THEME } from './theme.ts';
+import { WallView } from './walls.ts';
 
 /** Metres between terrain mesh vertices. Finer than this buys nothing at this camera. */
 const MESH_STEP = 1;
@@ -46,7 +47,7 @@ export class WorldView {
   private readonly cols: number;
   private readonly rows: number;
 
-  private readonly walls: THREE.InstancedMesh;
+  private readonly walls: WallView;
   private readonly props: THREE.InstancedMesh;
   private readonly foliage: THREE.InstancedMesh;
   private readonly propSlot = new Map<number, { mesh: THREE.InstancedMesh; slot: number }>();
@@ -56,7 +57,6 @@ export class WorldView {
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3();
   private readonly colour = new THREE.Color();
-  private readonly up = new THREE.Vector3(0, 1, 0);
 
   constructor(scene: SimScene, fog: FogOfWar) {
     this.scene = scene;
@@ -76,18 +76,8 @@ export class WorldView {
     this.terrainMesh.name = 'terrain';
     this.group.add(this.terrainMesh);
 
-    // Walls: one unit box per segment, stretched onto it.
-    const box = new THREE.BoxGeometry(1, 1, 1);
-    box.translate(0, 0.5, 0);
-    this.walls = new THREE.InstancedMesh(
-      box,
-      new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      Math.max(1, scene.structures.segments.length),
-    );
-    this.walls.castShadow = true;
-    this.walls.receiveShadow = true;
-    this.walls.count = scene.structures.segments.length;
-    this.group.add(this.walls);
+    this.walls = new WallView(scene);
+    this.group.add(this.walls.mesh);
 
     const solidProps = scene.structures.props.filter((p) => p.solidity !== Solidity.Concealment);
     const softProps = scene.structures.props.filter((p) => p.solidity === Solidity.Concealment);
@@ -117,7 +107,6 @@ export class WorldView {
     this.foliage.count = softProps.length;
     this.group.add(this.foliage);
 
-    scene.structures.segments.forEach((_, i) => this.writeSegment(i));
     solidProps.forEach((p, slot) => {
       this.propSlot.set(p.id, { mesh: this.props, slot });
       this.writeProp(p.id);
@@ -138,11 +127,7 @@ export class WorldView {
 
   /** Redraw whatever the simulation broke since last frame. */
   update(): void {
-    let dirty = false;
-    for (const id of this.scene.dirtySegments) {
-      this.writeSegment(id);
-      dirty = true;
-    }
+    let dirty = this.walls.update(this.scene.dirtySegments);
     this.scene.dirtySegments.clear();
     for (const id of this.scene.dirtyProps) {
       this.writeProp(id);
@@ -159,43 +144,10 @@ export class WorldView {
   }
 
   private flush(): void {
-    this.walls.instanceMatrix.needsUpdate = true;
     this.props.instanceMatrix.needsUpdate = true;
     this.foliage.instanceMatrix.needsUpdate = true;
-    if (this.walls.instanceColor) this.walls.instanceColor.needsUpdate = true;
     if (this.props.instanceColor) this.props.instanceColor.needsUpdate = true;
     if (this.foliage.instanceColor) this.foliage.instanceColor.needsUpdate = true;
-  }
-
-  private writeSegment(id: number): void {
-    const s = this.scene.structures.segments[id];
-    if (!s) return;
-    if (s.destroyed) {
-      this.matrix.makeScale(0, 0, 0);
-      this.walls.setMatrixAt(id, this.matrix);
-      return;
-    }
-
-    const length = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y);
-    const midX = (s.a.x + s.b.x) / 2;
-    const midY = (s.a.y + s.b.y) / 2;
-    const base = Math.min(
-      this.scene.heightAt(s.a.x, s.a.y),
-      this.scene.heightAt(s.b.x, s.b.y),
-    );
-    // A battered wall visibly slumps, which is the cue that the man behind it
-    // is no longer as safe as he was.
-    const integrity = this.scene.structures.integrity(s);
-    const height = Math.max(0.12, s.top * (0.7 + 0.3 * integrity));
-
-    this.position.set(midX, base - 0.25, midY);
-    this.quaternion.setFromAxisAngle(this.up, -Math.atan2(s.b.y - s.a.y, s.b.x - s.a.x));
-    this.scale.set(length + s.thickness * 0.4, height + 0.25, s.thickness);
-    this.matrix.compose(this.position, this.quaternion, this.scale);
-    this.walls.setMatrixAt(id, this.matrix);
-
-    this.colour.set(FABRIC_COLOUR[s.fabric] ?? THEME.wall).multiplyScalar(0.62 + 0.38 * integrity);
-    this.walls.setColorAt(id, this.colour);
   }
 
   private writeProp(id: number): void {
