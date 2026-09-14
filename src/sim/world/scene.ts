@@ -221,6 +221,29 @@ export class Scene {
     return points;
   }
 
+  /**
+   * What share of a piece of ground a man here could actually engage.
+   *
+   * The counterpart to `findCover`, and the question a defender should be
+   * asking first: cover answers "how much of me shows", this answers "what can
+   * I do about anyone out there". A position chosen only by the first is a
+   * hiding place, and a line of them is not a defence.
+   */
+  fieldOfFire(from: Vec2, ground: Vec2[], eye = 1.04): number {
+    if (ground.length === 0) return 0;
+    let covered = 0;
+    for (const g of ground) {
+      const seen = this.sightThroughSmoke(
+        { x: from.x, y: from.y, eye },
+        { x: g.x, y: g.y, base: 0, top: 1.78 },
+      );
+      // Partial counts for what it is: seeing a man's head and shoulders over
+      // a crest is a worse shot than seeing all of him, not the same one.
+      covered += seen.exposure;
+    }
+    return covered / ground.length;
+  }
+
   /** What standing on this patch of ground costs, against a whole threat arc. */
   stance(
     pos: Vec2, arc: Vec2[], crouchTop = 1.18, eye = 1.04,

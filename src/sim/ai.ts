@@ -155,18 +155,25 @@ function updateSenses(ctx: SimContext, u: Unit, dt: number): void {
  * coherently without the player narrating it.
  */
 function shareContacts(ctx: SimContext, squad: Squad): void {
+  // Casualties are excluded from both halves, and that is load-bearing rather
+  // than tidy. A man who is down stops being updated, so his memories stop
+  // ageing — pooling from him fed the survivors a sighting that was eternally
+  // a tenth of a second old, and the squad never forgot anything its casualties
+  // had seen. It went unnoticed while memory only nudged where people looked;
+  // it became obvious the moment area fire started consuming it, and men raked
+  // a patch of ground for ever on the word of a corpse.
   const pooled = new Map<number, { pos: Vec2; age: number }>();
+  const living: Unit[] = [];
   for (const id of squad.memberIds) {
     const u = ctx.units.get(id);
-    if (!u) continue;
+    if (!u || u.state !== UnitState.Active) continue;
+    living.push(u);
     for (const [eid, mem] of u.memory) {
       const existing = pooled.get(eid);
       if (!existing || mem.age < existing.age) pooled.set(eid, mem);
     }
   }
-  for (const id of squad.memberIds) {
-    const u = ctx.units.get(id);
-    if (!u) continue;
+  for (const u of living) {
     for (const [eid, mem] of pooled) {
       const own = u.memory.get(eid);
       if (!own || own.age > mem.age) u.memory.set(eid, { pos: { ...mem.pos }, age: mem.age });

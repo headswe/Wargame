@@ -27,6 +27,11 @@ const AWARENESS_RADIUS = 7;
 /** Fog is tracked coarser than the simulation — it only has to look right. */
 const FOG_CELL = 1;
 
+/** How far a defender will range from his posted spot to find a field of fire. */
+const DIG_IN_RADIUS = 8;
+/** Share of his sector a defender insists on being able to cover. */
+const MIN_FIELD_OF_FIRE = 0.25;
+
 const TEAM_NAMES = ['ALPHA', 'BRAVO', 'CHARLIE'];
 const FIRETEAM: { role: Role; weapon: keyof typeof WEAPONS }[] = [
   { role: 'Team Leader', weapon: 'carbine' },
@@ -163,16 +168,63 @@ export class Sim implements SimContext {
    */
   private digIn(u: Unit): void {
     const threat = vec(u.pos.x, Math.min(this.scene.height - 2, u.pos.y + 60));
-    const spots = this.scene.findCover(u.pos, 5, threat, {
+    const approach = this.approachFan(u.pos);
+    const spots = this.scene.findCover(u.pos, DIG_IN_RADIUS, threat, {
       crouchTop: Stature.crouchedTop,
       eye: Stature.crouchedEye,
-      samples: 24,
+      samples: 40,
     });
-    const pick = spots.find((s) => s.canFire) ?? spots[0];
-    if (!pick) return;
+    if (spots.length === 0) return;
+
+    // A field of fire is a requirement, not a preference. Choosing by
+    // concealment alone gave fourteen men who were very hard to see and could
+    // not see anything either — a shot available for twenty-six seconds out of
+    // a two-minute assault. But maximising the view instead is worse: it takes
+    // them out of cover, and a defender you can see coming is one a reckless
+    // attacker can simply shoot, which removes the punishment for recklessness
+    // that is most of what a defence is for. So: the best cover available,
+    // among positions that can actually cover the sector.
+    //
+    // `spots` arrives sorted by cover, so the first one that clears the bar is
+    // the answer. Failing that, take the widest view going — better a man who
+    // can shoot than one who is merely well hidden.
+    let pick: (typeof spots)[number] | null = null;
+    let widest = spots[0];
+    let best = -Infinity;
+    for (const spot of spots) {
+      const covers = this.scene.fieldOfFire(spot.pos, approach, Stature.crouchedEye);
+      if (covers > best) {
+        best = covers;
+        widest = spot;
+      }
+      if (pick === null && covers >= MIN_FIELD_OF_FIRE) pick = spot;
+    }
+    pick = pick ?? widest;
+
     u.pos = { ...pick.pos };
     u.coverSpot = { ...pick.pos };
     u.groundHeight = this.scene.heightAt(u.pos.x, u.pos.y);
+  }
+
+  /**
+   * The ground a defender is there to cover: a fan of places an attacker could
+   * actually stand, out along the approach.
+   *
+   * Walkable only, because a position that commands a hillside nobody can climb
+   * commands nothing.
+   */
+  private approachFan(from: Vec2): Vec2[] {
+    const out: Vec2[] = [];
+    for (const range of [22, 40, 60]) {
+      for (const turn of [-0.7, -0.35, 0, 0.35, 0.7]) {
+        const a = Math.PI / 2 + turn;
+        const p = vec(from.x + Math.cos(a) * range, from.y + Math.sin(a) * range);
+        if (p.x < 1 || p.y < 1 || p.x > this.scene.width - 1 || p.y > this.scene.height - 1) continue;
+        if (!this.scene.walkable(p.x, p.y)) continue;
+        out.push(p);
+      }
+    }
+    return out;
   }
 
   get playerSquads(): Squad[] {
