@@ -613,6 +613,7 @@ addEventListener('keydown', (e) => {
     viewport.topDown();
     dirty = true;
   }
+  if (e.key === '?' || e.key === '/') toggleHelp();
 });
 
 // --------------------------------------------------------------------- menu
@@ -674,6 +675,9 @@ document.getElementById('menubar')!.addEventListener('click', (e) => {
       viewport.frame(doc.data.size.width, doc.data.size.height);
       dirty = true;
       break;
+    case 'help':
+      toggleHelp();
+      break;
     case 'playtest':
       sessionStorage.setItem(PLAYTEST, doc.toJSON());
       window.open('./index.html?playtest=1', '_blank');
@@ -696,6 +700,38 @@ document.getElementById('menubar')!.addEventListener('click', (e) => {
   viewport.setGridVisible((e.target as HTMLInputElement).checked);
   dirty = true;
 };
+
+/** The shortcuts, written down where somebody might find them. */
+const HELP: [string, string][] = [
+  ['V  X  Q', 'select, measure, sightline probe'],
+  ['B  W  L  O  H', 'building, wall, low wall, obstacle, hedge'],
+  ['G  R  D  K', 'sculpt, road, ditch, bank'],
+  ['M  C  U  P', 'mound, crater, paint, patch'],
+  ['1  2  3', 'operator, defender, objective'],
+  ['[  ]', 'turn the selection, or the armed piece'],
+  ['arrows / shift', 'nudge by a metre, or five'],
+  ['Delete', 'remove the selection'],
+  ['Ctrl+Z  Ctrl+Shift+Z', 'undo, redo'],
+  ['Ctrl+C  Ctrl+V', 'copy, paste — through storage, so it crosses levels'],
+  ['Ctrl+D', 'duplicate in place'],
+  ['Ctrl+A', 'select everything'],
+  ['Ctrl+\u2191  Ctrl+\u2193', 'reorder — operations apply top to bottom'],
+  ['F  T', 'frame the level, look straight down'],
+  ['right-drag', 'pan  \u00b7  shift-right-drag orbits  \u00b7  wheel zooms'],
+  ['Escape', 'drop the selection, or abandon a run being drawn'],
+];
+
+const helpPanel = document.getElementById('help') as HTMLElement;
+helpPanel.innerHTML =
+  '<div class="card"><h2>Level editor</h2><dl>' +
+  HELP.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') +
+  '</dl><p>Everything autosaves. Save writes a level file; Open reads one back. ' +
+  'Playtest hands the game exactly what is on screen.</p></div>';
+helpPanel.onclick = () => toggleHelp(false);
+
+function toggleHelp(force?: boolean): void {
+  helpPanel.hidden = force === undefined ? !helpPanel.hidden : !force;
+}
 
 // --------------------------------------------------------------------- go
 

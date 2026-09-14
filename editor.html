@@ -41,6 +41,7 @@
           <label class="check"><input type="checkbox" id="grid" checked /> Grid</label>
         </span>
         <span class="group right">
+          <button data-act="help" title="?">?</button>
           <button data-act="top">Top-down</button>
           <button data-act="frame">Frame</button>
           <button class="go" data-act="playtest">Playtest &rsaquo;</button>
@@ -63,6 +64,7 @@
 
       <footer id="status"><span id="hint"></span><span id="coords"></span></footer>
     </div>
+    <div id="help" hidden></div>
     <input type="file" id="file" accept="application/json,.json" hidden />
     <script type="module" src="/src/editor/main.ts"></script>
   </body>

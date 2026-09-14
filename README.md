@@ -23,10 +23,20 @@ create the site.
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
-npm test          # headless simulation tests
-npm run playtest  # drives the real game in a browser (needs `npm run dev` up)
+npm run dev           # http://localhost:5173
+npm test              # headless simulation tests
+npm run balance       # measured comparison of three scripted plans
+npm run playtest      # drives the real game in a browser (needs `npm run dev` up)
+npm run editor-check  # drives the level editor in a browser (ditto)
 ```
+
+Three pages, all served by the same dev server:
+
+| | |
+|---|---|
+| `/` | the game |
+| `/editor.html` | the level editor |
+| `/walls.html` | a look-book of every wall fabric, intact and shot to pieces |
 
 ## The one design decision everything else follows from
 
@@ -92,10 +102,11 @@ cannot tell which side of a wall is safe. The answers:
 ```
 src/sim/      the whole game, deterministic, zero rendering imports
 src/render/   three.js: level, units, fog, tracers, cover markers
+src/editor/   the level editor
 src/input/    mouse and keyboard
 src/ui/       DOM HUD
 test/         headless simulation tests
-tools/        scripted browser playtest
+tools/        scripted browser checks and the balance harness
 ```
 
 The split is load-bearing, not tidiness. The simulation runs headless at
@@ -103,18 +114,108 @@ thousands of ticks a second, which is what makes it possible to ask questions
 like "does flanking actually beat a frontal assault across 24 seeds" and get an
 answer in a few seconds. It also means the same seed replays exactly.
 
-## Levels are ASCII
+## A level is data
 
-A map is a readable diff. `src/sim/levels.ts`:
+A level is a list of operations applied in order, and nothing else. Every one is
+a plain object that survives a round trip through JSON, which is what makes a
+level something that can be saved, diffed, generated, validated and edited
+rather than a function that happens to draw one.
 
+```ts
+{
+  version: 1,
+  id: 'stepove', name: 'Stepove', brief: '...',
+  size: { width: 170, height: 130 },
+  terrain: [
+    { op: 'rolling', amplitude: 1.5, wavelength: 38, seed: 11 },
+    { op: 'cut', path: [...], width: 6.5, depth: 1.7, surface: Surface.Mud },
+    { op: 'road', path: [...], width: 7 },
+  ],
+  structures: [
+    { op: 'building', rect: { at: {...}, width: 15, depth: 11, angle: -0.22 },
+      openings: [{ side: 2, at: 7.2, width: 1.6, kind: 'door' }] },
+  ],
+  spawns: { teams: [...], enemies: [...], objectives: [...] },
+}
 ```
-#  wall — blocks movement, sight and bullets
-o  low cover — blocks movement, shoot over it, good protection
-"  firing port — shoot through it, cannot walk through it
-+  doorway — a funnel, so a natural killzone
-1/2/3  fireteam spawns      e  hostile    E  hostile with the belt-fed
-X  objective
-```
+
+**Order is a program, not presentation.** A road laid before a ditch is cut
+through by it; one laid after rides over it. The editor can reorder them because
+that distinction is the only way to say which you meant.
+
+Terrain operations: `heightmap`, `surfacemap`, `rolling`, `mound`, `bank`,
+`cut`, `road`, `paint`, `crater`. Structures: `building`, `wall`, `revetment`,
+`hedgerow`, `obstacle`. Linear features follow a curve through their control
+points rather than cornering between them, because a polyline kink gets carved
+into the heightfield as a crease visible from across the map.
+
+`validateLevel` reports everything wrong with a level rather than throwing on
+the first problem, because an editor has to be able to show work in progress and
+an author needs the whole list. `migrate` brings a file written by an older
+build forward; a file from a newer one is refused rather than half-read.
+
+## Buildings have doors and windows
+
+A building is a closed polygon of walls plus whatever divides the inside.
+Openings are addressed as *two metres along the north wall* — the way anybody
+would say it out loud — rather than as a fraction of the whole perimeter, which
+meant that widening a house moved every window in it.
+
+A window is an opening rather than a slot cut to the roof: it leaves a sill you
+shoot over and cannot climb through, and a lintel above it that is solid. That
+needed the sightline solver to learn a second question. It answers *how low can
+I see*, which is right for walls and crests because those stand on the ground —
+and a lintel does not; it hides the top of a target rather than the bottom. The
+same walk now carries a ceiling alongside the waterline, by the same equation
+upside down.
+
+On flat ground a lintel changes nothing, since every sightline between two men
+on one plane passes under it. It starts mattering the moment anything is above
+anything else, which is the point: it is what an upper floor will need in order
+to exist.
+
+## The editor
+
+`/editor.html`. It mounts the game's own renderer — an editor that draws its own
+approximation of the world is an editor that lies, and every disagreement
+between the two is a bug found later and blamed on the game.
+
+Two decisions carry most of it. Every operation is reduced to a list of handles
+and an outline, so one drag implementation serves all of them; adding an
+operation makes it editable by saying where its points are. And undo is
+whole-document snapshots rather than inverse operations — a level is tens of
+kilobytes of JSON, and an undo method per edit is where editors grow their most
+embarrassing bug.
+
+**The overlays are the actual reason it exists.** Placing a wall accurately is
+not hard and does not need a tool. Knowing whether that wall made the ground in
+front of it a killing zone, or left an approach nobody can cover, is the job —
+and nothing about a 3D view of some boxes tells you any of it. Every layer is
+computed with the game's own code, because an overlay that disagrees with the
+simulation is worse than none at all, being believed.
+
+Pointed at Stepove, *what the defence covers* reports 65% of the walkable ground
+covered and **35% seen by nobody**, and draws the uncontested western approach
+in plain blue. The sightline probe says the machine gun position holds 38 metres
+of ground on average.
+
+| | |
+|---|---|
+| `V` `X` `Q` | select, measure, sightline probe |
+| `B` `W` `L` `O` `H` | building, wall, low wall, obstacle, hedge |
+| `G` `R` `D` `K` `M` `C` `U` `P` | sculpt, road, ditch, bank, mound, crater, paint, patch |
+| `1` `2` `3` | operator, defender, objective |
+| `[` `]` | turn the selection (or the armed piece) |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | undo, redo |
+| `Ctrl+C` / `Ctrl+V` | copy, paste — through storage, so it crosses levels |
+| `Ctrl+↑` / `Ctrl+↓` | reorder the selected operation |
+| `F` `T` | frame the level, look straight down |
+| right-drag / shift-right-drag / wheel | pan, orbit, zoom |
+
+Checks that need the level *built* rather than merely read — a house whose door
+a wall was laid across, an objective no team can reach — run continuously
+alongside the structural ones. Playtest hands the running game exactly what is
+on screen, not the last thing saved.
 
 ## The world
 
@@ -126,9 +227,21 @@ across its width while still riding over the hill it crosses, a ditch cuts down,
 a shell deforms the ground and throws up a lip.
 
 Structures are **vector segments** at any angle, with a fabric, hit points, and
-a sill/top pair so one type covers a full wall, a waist-high revetment and a
-window band. Props carry the category a grid cannot express: bushes are
-**concealment, not cover** — they hide you without stopping anything.
+a sill/top pair so one type covers a full wall, a waist-high revetment, a window
+sill and the lintel above it. Props carry the category a grid cannot express:
+bushes are **concealment, not cover** — they hide you without stopping anything.
+
+Each fabric is drawn as the thing it is rather than as a stretched box: panels
+under an oversailing coping course for masonry, staggered courses for a sandbag
+revetment, posts and rails for a fence you can see through, a low spill of
+chunks for rubble. Runs are cut into panels that each stand on the ground
+beneath themselves, so a long wall climbs a slope instead of hovering over it.
+Cover is the subject of this game, so what a piece of it is made of has to be
+readable at a glance from across the map.
+
+What is underfoot does something too: a road is the quickest way across a map
+and the most exposed, and the mud in the bottom of a ditch is slow enough that
+taking it is a decision.
 
 Navigation is a **Recast-style navmesh**: voxelise walkability from slope and
 obstacles, distance-transform and erode by the agent radius, trace contours off
@@ -166,20 +279,37 @@ point at.
 
 ## Numbers
 
+Measured on Stepove — 170×130 m, 135 wall segments, 253 props, 26 men.
+
 ```
-scene build            ~215 ms at mission start
-simulation             0.36 ms/tick        (2% of a 60 Hz budget)
-navmesh                ~1170 triangles
-path query             0.13 ms             (mean 1.38x straight-line)
-sightline              2.12 us over 100 m  (~17 ms/s at full load)
-rebuild after a breach ~12 ms steady state
+scene build            ~365 ms at mission start   (was 215 ms before lintels)
+simulation             0.91 ms/tick               (5% of a 60 Hz budget)
+navmesh                ~2850 cells
+sightline              1.50 us over Stepove       (1.39 us before the ceiling test)
+level rebuild (editor) ~145 ms for a structure edit, terrain reused
+overlay sweep          ~115 ms for 5,500 samples against 14 defenders
 ```
+
+The simulation cost has risen with the last few passes — per-soldier nerve, the
+ceiling term in the sightline solver, richer posture and ordnance. Still five
+per cent of a frame, so it is recorded rather than worried about.
 
 ## What is deliberately not here yet
 
 - **The PMC layer** — contracts, payroll, gear, a persistent roster. This is
   what makes losing Voss hurt rather than decrementing a counter, and it goes
   on top of a tactical layer that already works.
-- **Grenades, breaching, and stances** beyond walk/run.
+- **Upper floors.** `Building.storey` is reserved and always 0. The lintel work
+  above was the prerequisite; elevation is the one addition that changes
+  sightlines qualitatively rather than just moving them.
+- **Roofs**, which is why a building still reads as a plan rather than a
+  building. Same piece of work as the storey.
 - **Sound**, which does more for a firefight than most of the visuals.
 - **Interior clearing behaviour** — room entry is currently just movement.
+- **Emplaced crew-served weapons**, which would fix a defence whose belt-fed is
+  a single point of failure.
+- **A mission shape that bites** — a clock, reinforcements, extraction. None of
+  the three scripted plans in `npm run balance` finishes inside 200 seconds.
+
+Only ever verified on headless software rendering at a few frames a second. It
+has never been looked at on a real GPU.

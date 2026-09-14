@@ -99,3 +99,15 @@ textarea { font: inherit; color: var(--text); background: #232a2e; border: 1px s
 #palette .row .kind { cursor: pointer; }
 #palette .row .kind:hover { color: var(--danger); }
 #palette button { margin-top: 3px; font-size: 11px; }
+
+#help { position: fixed; inset: 0; display: grid; place-content: center;
+  background: #0b0d0ee6; backdrop-filter: blur(3px); z-index: 20; }
+#help[hidden] { display: none; }
+#help .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 3px;
+  padding: 18px 24px; max-width: 640px; }
+#help h2 { margin: 0 0 12px; font-size: 12px; letter-spacing: 0.18em; color: var(--accent);
+  text-transform: uppercase; }
+#help dl { display: grid; grid-template-columns: 190px 1fr; gap: 3px 14px; margin: 0 0 12px; }
+#help dt { color: var(--accent); }
+#help dd { margin: 0; color: var(--text); }
+#help p { color: var(--dim); margin: 0; }
