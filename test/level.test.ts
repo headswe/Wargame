@@ -8,9 +8,12 @@ import { SURFACE, SURFACE_KEEP, Surface } from '../src/sim/world/terrain.ts';
 import { building, rect, wall } from '../src/sim/world/builder.ts';
 import { Fabric } from '../src/sim/world/geometry.ts';
 import {
-  type LevelData, LEVEL_FORMAT, applyLevel, migrate, packRuns, unpackRuns, validateLevel,
+  type LevelData, LEVEL_FORMAT, applyLevel, createScene, defineLevel, migrate,
+  packRuns, unpackRuns, validateLevel,
 } from '../src/sim/world/level-data.ts';
-import { STEPOVE_DATA } from '../src/sim/levels.ts';
+import { sightFan } from '../src/sim/world/analysis.ts';
+import { audit } from '../src/editor/audit.ts';
+import { LEVEL_DATA, STEPOVE_DATA } from '../src/sim/levels.ts';
 import { Faction, MoveMode, WEAPONS, makeUnit, resetUnitIds, speedOf } from '../src/sim/units.ts';
 
 test('a curve goes through the points it was given and does not corner', () => {
@@ -333,4 +336,36 @@ test('a level is checked over rather than thrown out', () => {
   assert.ok(/at least one team/.test(messages), 'nobody starts here');
   assert.ok(/no objective/.test(messages), 'nothing to take');
   assert.ok(problems.every((p) => p.where && p.severity), 'every problem says where and how bad');
+});
+
+test('every level the game ships is one you can actually play', () => {
+  // The gate that matters. A level is code now, and a broken one looks
+  // completely normal in the viewport right up until nobody can reach the
+  // objective, a defender is standing inside a wall, or a house has a door
+  // drawn on it that the navmesh disagrees with.
+  for (const raw of LEVEL_DATA) {
+    const data = migrate(structuredClone(raw));
+    const def = defineLevel(data);
+    const scene = createScene(def);
+    const problems = [...validateLevel(data), ...audit(scene, data)];
+    const errors = problems.filter((p) => p.severity === 'error');
+
+    // Shipped content is held to no problems at all rather than no errors.
+    // "A defender is standing inside something solid" is a warning because an
+    // editor must not block on work in progress; it is not something to ship.
+    assert.equal(
+      problems.length, 0,
+      `${def.name}: ${problems.map((p) => `${p.severity}: ${p.message}`).join('; ')}`,
+    );
+    assert.equal(errors.length, 0);
+    assert.ok(data.spawns.teams.flat().length >= 4, `${def.name} has nobody to play as`);
+    assert.ok(data.spawns.enemies.length >= 3, `${def.name} has nobody defending it`);
+
+    // And every defender can see something, or he is scenery with a rifle.
+    const blind = data.spawns.enemies.filter((e) => sightFan(scene, e.pos, 90, 48).reach < 3);
+    assert.ok(
+      blind.length === 0,
+      `${def.name}: ${blind.length} defenders are sited where they can see nothing`,
+    );
+  }
 });

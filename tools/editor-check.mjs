@@ -121,7 +121,7 @@ await page.selectOption('#overlay', 'fire');
 await page.waitForTimeout(2500);
 const stats = await page.evaluate(() => window.editor.overlays.stats);
 check('the fire overlay measures the ground',
-  !!stats && stats.samples > 1000 && stats.covered > 0,
+  !!stats && stats.walkableSamples > 1000 && stats.covered > 0,
   stats ? `${(stats.covered * 100).toFixed(0)}% covered, ${(stats.dead * 100).toFixed(0)}% dead ground, ${stats.millis.toFixed(0)}ms` : 'no stats');
 await page.screenshot({ path: `${OUT}/editor-fire.png` });
 

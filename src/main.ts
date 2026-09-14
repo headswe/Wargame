@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import './ui/style.css';
 
-import { STEPOVE } from './sim/levels.ts';
+import { LEVELS, STEPOVE } from './sim/levels.ts';
 import { type LevelDef, defineLevel, migrate } from './sim/world/level-data.ts';
 import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
@@ -51,12 +51,21 @@ const LEVEL: LevelDef = resolveLevel();
 
 function resolveLevel(): LevelDef {
   try {
-    if (new URLSearchParams(location.search).has('playtest')) {
+    const query = new URLSearchParams(location.search);
+    if (query.has('playtest')) {
       const raw = sessionStorage.getItem('wargame.playtest');
       if (raw) return defineLevel(migrate(JSON.parse(raw)));
     }
+    // ?level=kolna. A proper picker belongs with the contracts layer; until
+    // then this is how the second map gets played at all.
+    const wanted = query.get('level');
+    if (wanted) {
+      const found = LEVELS.find((l) => l.id === wanted);
+      if (found) return found;
+      console.warn(`no level called "${wanted}" — have ${LEVELS.map((l) => l.id).join(', ')}`);
+    }
   } catch (error) {
-    console.warn('could not load the playtest level, falling back:', error);
+    console.warn('could not load that level, falling back:', error);
   }
   return STEPOVE;
 }

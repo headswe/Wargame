@@ -84,13 +84,16 @@ export function wall(scene: Scene, spec: WallSpec): number[] {
     .map((o) => {
       const centre = (o.at === 'centre' ? length / 2 : o.at) / length;
       // Each wall end bulges into the gap beside it, by half its thickness or
-      // half the grid's minimum stamp, whichever is wider. A doorway therefore
-      // has to be cut wider than it wants to be, or the author asks for two
-      // metres, gets one, and the navmesh quietly seals the building. Taking
-      // the floor rather than the thickness is what lets a wall get thin
-      // without its doors closing up behind it.
-      const bulge = Math.max(thickness, STAMP_FLOOR);
-      const cut = (o.kind === 'door' ? o.width + bulge : o.width) / length;
+      // half the grid's minimum stamp, whichever is wider. Every opening
+      // therefore has to be cut wider than it wants to be, or the author asks
+      // for two metres and gets one.
+      //
+      // This used to apply to doorways only, on the grounds that a sealed
+      // building is obvious and a slightly narrow window is not. It is not:
+      // anything cut narrower than the stamp floor closes up completely, so a
+      // firing slit in a wall simply was not there, and a defence built behind
+      // loopholes was blind without anything saying so.
+      const cut = (o.width + Math.max(thickness, STAMP_FLOOR)) / length;
       return {
         from: Math.max(0, centre - cut / 2),
         to: Math.min(1, centre + cut / 2),

@@ -16,7 +16,8 @@
  *   npm run balance -- bounding      # one plan only
  */
 import { MissionState, Sim } from '../src/sim/sim.ts';
-import { STEPOVE } from '../src/sim/levels.ts';
+import { KOLNA, STEPOVE } from '../src/sim/levels.ts';
+import { createScene } from '../src/sim/world/level-data.ts';
 import { Faction, MoveMode, Nerve, Posture, UnitState } from '../src/sim/units.ts';
 import { dist, vec } from '../src/sim/math.ts';
 import { hitChance } from '../src/sim/combat.ts';
@@ -47,7 +48,7 @@ const OBJECTIVE = { x: 94, y: 14 };
 
 /** Straight up the middle at a run. The way you are not supposed to do it. */
 const FRONTAL: Step[] = [];
-for (const [t, y] of [[0, 100], [16, 86], [30, 70], [46, 50], [62, 30]] as const) {
+for (const [t, y] of [[0, 100], [16, 86], [30, 70], [46, 50], [62, 42]] as const) {
   for (const squad of [0, 1, 2]) FRONTAL.push(step(t, squad, 80 + squad * 8, y, MoveMode.Sprint));
 }
 for (const squad of [0, 1, 2]) {
@@ -85,8 +86,8 @@ const DITCH: Step[] = [
   step(34, 2, 108, 77, MoveMode.Tactical),
   step(56, 1, 86, 66, MoveMode.Tactical),
   step(72, 0, 64, 62, MoveMode.Tactical),
-  step(72, 2, 106, 60, MoveMode.Tactical),
-  step(90, 1, 86, 56, MoveMode.Tactical),
+  step(72, 2, 106, 56, MoveMode.Tactical),
+  step(90, 1, 86, 52, MoveMode.Tactical),
   step(106, 0, 60, 44, MoveMode.Tactical),
   step(106, 2, 110, 44, MoveMode.Tactical),
   step(126, 1, 88, 42, MoveMode.Tactical),
@@ -95,7 +96,72 @@ const DITCH: Step[] = [
   step(162, 1, OBJECTIVE.x, OBJECTIVE.y + 5, MoveMode.Tactical),
 ];
 
-const PLANS: Record<string, Step[]> = { frontal: FRONTAL, bounding: BOUNDING, ditch: DITCH };
+/**
+ * Kolna: the same question asked of a level with no open ground in it.
+ *
+ * Stepove's plans are about how to cross eighty metres. These are about which
+ * way round a wall to go, which is the point of having a second map — the
+ * systems were all tuned against a long approach, and a harness that can only
+ * measure long approaches cannot say whether they generalise.
+ */
+const KOLNA_OBJECTIVE = { x: 66, y: 20 };
+
+/** Straight up the haul road at the gate everyone is watching. */
+const KOLNA_FRONTAL: Step[] = [
+  step(0, 0, 60, 88, MoveMode.Tactical),
+  step(0, 1, 70, 88, MoveMode.Tactical),
+  step(0, 2, 80, 88, MoveMode.Tactical),
+  step(24, 0, 62, 78, MoveMode.Sprint),
+  step(24, 1, 70, 78, MoveMode.Sprint),
+  step(24, 2, 78, 78, MoveMode.Sprint),
+  step(56, 0, 60, 62, MoveMode.Sprint),
+  step(56, 1, 70, 62, MoveMode.Sprint),
+  step(56, 2, 76, 58, MoveMode.Sprint),
+  step(96, 0, 58, 40, MoveMode.Sprint),
+  step(96, 1, 70, 40, MoveMode.Sprint),
+  step(96, 2, 80, 40, MoveMode.Sprint),
+  step(140, 0, 58, 24, MoveMode.Sprint),
+  step(140, 1, KOLNA_OBJECTIVE.x, KOLNA_OBJECTIVE.y + 6, MoveMode.Sprint),
+  step(140, 2, 76, 24, MoveMode.Sprint),
+];
+
+/** Base of fire on the forward post, both flanks round the outside of the wall. */
+const KOLNA_FLANKS: Step[] = [
+  step(0, 1, 70, 90, MoveMode.Tactical),
+  step(4, 0, 20, 90, MoveMode.Tactical),
+  step(4, 2, 128, 92, MoveMode.Tactical),
+  step(22, 0, 16, 62, MoveMode.Tactical),
+  step(22, 2, 126, 76, MoveMode.Tactical),
+  step(46, 1, 70, 80, MoveMode.Tactical),
+  step(64, 0, 18, 46, MoveMode.Tactical),
+  step(64, 2, 122, 52, MoveMode.Tactical),
+  step(90, 0, 28, 40, MoveMode.Tactical),
+  step(90, 2, 108, 46, MoveMode.Tactical),
+  step(116, 1, 70, 62, MoveMode.Tactical),
+  step(138, 0, 42, 30, MoveMode.Tactical),
+  step(138, 2, 94, 32, MoveMode.Tactical),
+  step(164, 1, 70, 30, MoveMode.Tactical),
+  step(184, 1, KOLNA_OBJECTIVE.x, KOLNA_OBJECTIVE.y + 6, MoveMode.Tactical),
+];
+
+interface Map {
+  level: typeof STEPOVE;
+  objective: { x: number; y: number };
+  plans: Record<string, Step[]>;
+}
+
+const MAPS: Record<string, Map> = {
+  stepove: {
+    level: STEPOVE,
+    objective: OBJECTIVE,
+    plans: { frontal: FRONTAL, bounding: BOUNDING, ditch: DITCH },
+  },
+  kolna: {
+    level: KOLNA,
+    objective: KOLNA_OBJECTIVE,
+    plans: { frontal: KOLNA_FRONTAL, flanks: KOLNA_FLANKS },
+  },
+};
 
 const SEEDS = [1009, 2213, 4242, 7717, 9001];
 const DURATION = 200;
@@ -143,8 +209,8 @@ interface Result {
   onTheObjective: number;
 }
 
-function play(plan: Step[], seed: number): Result {
-  const sim = new Sim(STEPOVE, seed);
+function play(map: Map, plan: Step[], seed: number): Result {
+  const sim = new Sim(map.level, seed);
   const hostiles = sim.unitList.filter((u) => u.faction === Faction.Hostile);
   const players = sim.unitList.filter((u) => u.faction === Faction.Player);
   const startingAmmo = new Map(hostiles.map((h) => [h.id, h.ammoInMag]));
@@ -255,23 +321,60 @@ function mean(xs: number[]): number {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
-const only = process.argv[2];
-const names = only ? [only] : Object.keys(PLANS);
+/**
+ * A plan that orders a squad onto a wall is not a plan being measured, it is a
+ * typo being measured. The order plumbing spirals out to the nearest ground a
+ * body fits on, so the run still happens and the result is quietly wrong.
+ */
+function checkPlans(map: Map): void {
+  const scene = createScene(map.level);
+  for (const [name, plan] of Object.entries(map.plans)) {
+    for (const s of plan) {
+      if (!scene.walkable(s.x, s.y)) {
+        console.warn(
+          `  warning: ${name} sends squad ${s.squad} to ${s.x},${s.y} at ${s.t}s, ` +
+          'which is inside something solid',
+        );
+      }
+    }
+  }
+}
+
+const mapName = process.argv[2] && MAPS[process.argv[2]] ? process.argv[2] : 'stepove';
+const map = MAPS[mapName];
+if (process.argv[2] && !MAPS[process.argv[2]]) {
+  console.error(`no such map: ${process.argv[2]} (have ${Object.keys(MAPS).join(', ')})`);
+  process.exit(1);
+}
+checkPlans(map);
+const only = process.argv[3];
+const names = only ? [only] : Object.keys(map.plans);
 const totals = new Map<string, Result[]>();
 
 for (const name of names) {
-  const plan = PLANS[name];
+  const plan = map.plans[name];
   if (!plan) {
-    console.error(`no such plan: ${name} (have ${Object.keys(PLANS).join(', ')})`);
+    console.error(`no such plan: ${name} (have ${Object.keys(map.plans).join(', ')})`);
     process.exit(1);
   }
-  totals.set(name, SEEDS.map((seed) => play(plan, seed)));
+  totals.set(name, SEEDS.map((seed) => play(map, plan, seed)));
 }
 
 const pad = (s: string, n: number) => s.padEnd(n);
 const num = (v: number, n = 5, digits = 1) => v.toFixed(digits).padStart(n);
 
-console.log(`Stepove, ${SEEDS.length} seeds, ${DURATION}s each, all three plans aiming at the objective. 12 operators, 14 defenders.\n`);
+const ROSTER = (() => {
+  const sim = new Sim(map.level, SEEDS[0]);
+  return {
+    operators: sim.unitList.filter((u) => u.faction === Faction.Player).length,
+    defenders: sim.unitList.filter((u) => u.faction === Faction.Hostile).length,
+  };
+})();
+
+console.log(
+  `${map.level.name}, ${SEEDS.length} seeds, ${DURATION}s each, every plan aiming at ` +
+  `the objective. ${ROSTER.operators} operators, ${ROSTER.defenders} defenders.\n`,
+);
 console.log(
   `${pad('plan', 9)} ${pad('operators', 10)} ${pad('defenders', 10)} ` +
   `${pad('rounds P/H', 12)} ${pad('blind', 6)} ${pad('reach', 7)} ` +
@@ -296,22 +399,24 @@ for (const [name, runs] of totals) {
   const closest = mean(runs.map((x) => x.closest));
   const onObj = mean(runs.map((x) => x.onTheObjective));
   console.log(
-    `${pad(name, 9)} ${num(up, 4)}/12   ${num(def, 4)}/14   ` +
+    `${pad(name, 9)} ${num(up, 4)}/${ROSTER.operators}   ` +
+    `${num(def, 4)}/${ROSTER.defenders}   ` +
     `${num(pr, 4, 0)}/${num(hr, 4, 0)}   ${num(blind, 4, 0)}  ${num(reach, 5, 0)}s  ` +
-    `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/14   ` +
-    `${num(brokeP, 4)}/${num(brokeH, 4)}  ${num(closest, 5)}m  ${num(onObj, 4)}/12  ` +
+    `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/${ROSTER.defenders}   ` +
+    `${num(brokeP, 4)}/${num(brokeH, 4)}  ${num(closest, 5)}m  ` +
+    `${num(onObj, 4)}/${ROSTER.operators}  ` +
     `${won}/${runs.length}  ` +
     `| no shot: ${num(far, 4, 0)}s too far, ${num(blind2, 4, 0)}s no line`,
   );
 }
 
-const bounding = totals.get('bounding');
+const clever = totals.get('bounding') ?? totals.get('flanks');
 const frontal = totals.get('frontal');
-if (bounding && frontal) {
-  const gap = mean(bounding.map((x) => x.operatorsUp)) - mean(frontal.map((x) => x.operatorsUp));
-  const ground = mean(frontal.map((x) => x.closest)) - mean(bounding.map((x) => x.closest));
+if (clever && frontal) {
+  const gap = mean(clever.map((x) => x.operatorsUp)) - mean(frontal.map((x) => x.operatorsUp));
+  const ground = mean(frontal.map((x) => x.closest)) - mean(clever.map((x) => x.closest));
   console.log(
-    `\nskill gradient (bounding minus frontal): ${gap.toFixed(1)} operators, ` +
+    `\nskill gradient (the careful plan minus the charge): ${gap.toFixed(1)} operators, ` +
     `${ground.toFixed(0)}m of ground`,
   );
 }

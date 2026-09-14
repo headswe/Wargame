@@ -4,6 +4,7 @@ import {
   type LevelData, type LevelDef, type StructureOp, createScene, defineLevel,
 } from './world/level-data.ts';
 import { Surface } from './world/terrain.ts';
+import { KOLNA_DATA } from './maps/kolna.ts';
 
 export type { LevelData, LevelDef };
 export { createScene, defineLevel };
@@ -153,6 +154,18 @@ export const STEPOVE_DATA: LevelData = {
   },
 };
 
-export const STEPOVE: LevelDef = defineLevel(STEPOVE_DATA);
+/**
+ * Everything the game ships, as data.
+ *
+ * The catalogue is the data rather than the built levels, because everything
+ * that wants to do something with a level other than play it — the editor, the
+ * report tool, whatever generates contracts later — wants the description, not
+ * a closure that paints one.
+ */
+export const LEVEL_DATA: LevelData[] = [STEPOVE_DATA, KOLNA_DATA];
 
-export const LEVELS: LevelDef[] = [STEPOVE];
+export const LEVELS: LevelDef[] = LEVEL_DATA.map(defineLevel);
+
+export const STEPOVE: LevelDef = LEVELS[0];
+export const KOLNA: LevelDef = LEVELS[1];
+export { KOLNA_DATA };

@@ -12,7 +12,8 @@
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "playtest": "node tools/playtest.mjs",
     "balance": "node --experimental-strip-types tools/balance.ts",
-    "editor-check": "node tools/editor-check.mjs"
+    "editor-check": "node tools/editor-check.mjs",
+    "level-report": "node --experimental-strip-types tools/level-report.ts"
   },
   "dependencies": {
     "@types/earcut": "^3.0.0",

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Scene as SimScene } from '../sim/world/scene.ts';
-import { Stature } from '../sim/world/occlusion.ts';
+import { SAMPLE_STEP, type GroundStats, sampleGround, sightFan } from '../sim/world/analysis.ts';
 import type { LevelData } from '../sim/world/level-data.ts';
 import type { Vec2 } from '../sim/math.ts';
 
@@ -20,19 +20,9 @@ export type OverlayMode = 'none' | 'walkable' | 'fire' | 'cover';
  * than no overlay, because it is believed.
  */
 
-/** Metres between samples. Two is fine: cover does not change faster than a man. */
-const STEP = 2;
+const STEP = SAMPLE_STEP;
 
-export interface OverlayStats {
-  /** Share of walkable ground at least one defender can see. */
-  covered: number;
-  /** Share nobody can see: the approaches a level gives away for free. */
-  dead: number;
-  /** Mean number of defenders bearing on a piece of open ground. */
-  weight: number;
-  samples: number;
-  millis: number;
-}
+export type OverlayStats = GroundStats;
 
 export class Overlays {
   readonly mesh: THREE.Mesh;
@@ -75,55 +65,13 @@ export class Overlays {
   }
 
   private sample(scene: SimScene, data: LevelData): void {
-    const began = performance.now();
-    this.cols = Math.floor(scene.width / STEP) + 1;
-    this.rows = Math.floor(scene.height / STEP) + 1;
-    const count = this.cols * this.rows;
-    this.walkable = new Uint8Array(count);
-    this.seenBy = new Uint8Array(count);
-    this.exposure = new Float32Array(count);
-
-    const defenders = data.spawns.enemies.map((e) => e.pos);
-    let walkableCount = 0;
-    let coveredCount = 0;
-    let weightTotal = 0;
-
-    for (let j = 0; j < this.rows; j++) {
-      for (let i = 0; i < this.cols; i++) {
-        const k = j * this.cols + i;
-        const x = i * STEP;
-        const y = j * STEP;
-        const ok = scene.walkable(x, y);
-        this.walkable[k] = ok ? 1 : 0;
-        if (!ok || this.mode === 'walkable') continue;
-
-        walkableCount++;
-        let seen = 0;
-        let worst = 0;
-        for (const d of defenders) {
-          if (Math.hypot(d.x - x, d.y - y) > 260) continue;
-          const view = scene.sight(
-            { x: d.x, y: d.y, eye: Stature.crouchedEye },
-            { x, y, base: 0, top: Stature.standingTop },
-          );
-          if (!view.visible) continue;
-          seen++;
-          if (view.exposure > worst) worst = view.exposure;
-        }
-        this.seenBy[k] = Math.min(255, seen);
-        this.exposure[k] = worst;
-        if (seen > 0) coveredCount++;
-        weightTotal += seen;
-      }
-    }
-
-    this.stats = this.mode === 'walkable' ? null : {
-      covered: walkableCount === 0 ? 0 : coveredCount / walkableCount,
-      dead: walkableCount === 0 ? 0 : 1 - coveredCount / walkableCount,
-      weight: walkableCount === 0 ? 0 : weightTotal / walkableCount,
-      samples: walkableCount,
-      millis: performance.now() - began,
-    };
+    const ground = sampleGround(scene, data.spawns.enemies.map((e) => e.pos));
+    this.cols = ground.cols;
+    this.rows = ground.rows;
+    this.walkable = ground.walkable;
+    this.seenBy = ground.seenBy;
+    this.exposure = ground.exposure;
+    this.stats = this.mode === 'walkable' ? null : ground.stats;
   }
 
   private paint(scene: SimScene): void {
@@ -223,29 +171,9 @@ export class SightProbe {
   /** Cast the fan from `at`, out to `range` metres. */
   cast(scene: SimScene, at: Vec2, range = 140): void {
     this.at = at;
-    const bearings = 240;
-    const step = 2;
-    const eye = { x: at.x, y: at.y, eye: Stature.crouchedEye };
-    const edge: Vec2[] = [];
-    let total = 0;
-
-    for (let b = 0; b < bearings; b++) {
-      const angle = (b / bearings) * Math.PI * 2;
-      const dx = Math.cos(angle);
-      const dy = Math.sin(angle);
-      let reached = 0;
-      for (let d = step; d <= range; d += step) {
-        const x = at.x + dx * d;
-        const y = at.y + dy * d;
-        if (x < 0 || y < 0 || x > scene.width || y > scene.height) break;
-        // A man standing there, which is what the position is actually for.
-        if (!scene.sight(eye, { x, y, base: 0, top: Stature.standingTop }).visible) break;
-        reached = d;
-      }
-      total += reached;
-      edge.push({ x: at.x + dx * reached, y: at.y + dy * reached });
-    }
-    this.reach = total / bearings;
+    const fan = sightFan(scene, at, range);
+    this.reach = fan.reach;
+    const edge = fan.edge;
 
     const position: number[] = [];
     const lift = 0.16;
