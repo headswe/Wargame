@@ -197,6 +197,14 @@ export interface Unit {
   /** Breaking cover to get away from a live one, rather than following orders. */
   diving: boolean;
 
+  // Area fire
+  /** Ground being raked when there is nothing in sight worth shooting at. */
+  suppressAt: Vec2 | null;
+  /** Sim time this stops. Losing a contact buys a burst, not a career. */
+  suppressUntil: number;
+  /** The player asked for this, so it outlasts the squad's own initiative. */
+  suppressOrdered: boolean;
+
   /** Cosmetic: seconds since last shot, for muzzle flash timing in the renderer. */
   lastShotAt: number;
   /** Throttles A* retries when a slot is briefly unreachable. */
@@ -264,6 +272,9 @@ export function makeUnit(opts: {
     smokes: opts.role === 'Team Leader' ? 2 : 1,
     throwCooldown: 0,
     diving: false,
+    suppressAt: null,
+    suppressUntil: 0,
+    suppressOrdered: false,
     lastShotAt: 99,
     repathTimer: 0,
   };

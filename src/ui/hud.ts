@@ -48,8 +48,8 @@ export class Hud {
           <div><b>Right-click</b> move tactically &middot; <b>double right-click</b> run</div>
           <div><b>Right-click + drag</b> set the arc they face on arrival</div>
           <div><b>Left-click / drag</b> select &middot; <b>1&ndash;3 / Tab</b> pick a team</div>
-          <div><b>G</b> frag at the cursor &middot; <b>T</b> smoke &middot; <b>F</b> cover overlay</div>
-          <div><b>Q / E</b> rotate &middot; <b>WASD</b> pan &middot; <b>Space</b> centre on team</div>
+          <div><b>G</b> frag at the cursor &middot; <b>T</b> smoke &middot; <b>R</b> rake that ground</div>
+          <div><b>F</b> cover overlay &middot; <b>Q / E</b> rotate &middot; <b>WASD</b> pan &middot; <b>Space</b> centre</div>
         </div>
       </div>
       <div id="end"><div>
@@ -122,6 +122,7 @@ export class Hud {
 
     const pinned = active.some((u) => u.posture === Posture.Pinned);
     const contact = active.some((u) => u.visible.length > 0);
+    const raking = active.some((u) => u.suppressAt !== null);
     const moving = active.some((u) => u.path.length > 0);
     let state = 'holding';
     let stateClass = '';
@@ -130,6 +131,9 @@ export class Hud {
       stateClass = 'pinned';
     } else if (contact) {
       state = 'in contact';
+      stateClass = 'contact';
+    } else if (raking) {
+      state = 'suppressing';
       stateClass = 'contact';
     } else if (moving) {
       state = 'moving';

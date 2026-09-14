@@ -9,7 +9,7 @@ import {
 import {
   type PlannedSlot, type Squad, type SquadOrder, assignSlots, planSlots, spreadOffset,
 } from './squads.ts';
-import type { Effect } from './combat.ts';
+import { type Effect, canReach } from './combat.ts';
 import {
   type InFlight, Ordnance, launch, pickThrower, resetOrdnanceIds, spend, stockOf,
   updateOrdnance,
@@ -190,6 +190,8 @@ export class Sim implements SimContext {
 
     const order: SquadOrder = { dest: { ...dest }, mode, facing, issuedAt: this.time };
     squad.order = order;
+    // Being told to go somewhere ends being told to hold and shoot.
+    this.ceaseFire(squadId);
     for (const u of this.membersOf(squad)) {
       u.moveMode = mode;
       u.path.length = 0;
@@ -239,6 +241,45 @@ export class Sim implements SimContext {
     spend(thrower, kind);
     this.live.push(launch(this.scene, thrower, kind, at));
     return true;
+  }
+
+  /**
+   * Rake a piece of ground until told otherwise.
+   *
+   * The same verb the AI uses when it loses a contact, handed to the player,
+   * because a defender who can pin your crossing while you have no way to pin
+   * his is not a tactical problem, it is a broken one. Returns false when
+   * nobody on the team has a round that would get there.
+   */
+  suppressArea(squadId: number, at: Vec2, seconds = 14): boolean {
+    const squad = this.squads[squadId];
+    if (!squad) return false;
+    let any = false;
+    for (const u of this.membersOf(squad)) {
+      if (u.state !== UnitState.Active) continue;
+      if (!canReach(this.scene, u, at)) continue;
+      // Raking ground is a thing you stop to do. Holding the order and
+      // walking at the same time would be neither.
+      u.slot = null;
+      u.path.length = 0;
+      u.pathIndex = 0;
+      u.suppressAt = { ...at };
+      u.suppressUntil = this.time + seconds;
+      u.suppressOrdered = true;
+      u.postFacing = Math.atan2(at.y - u.pos.y, at.x - u.pos.x);
+      any = true;
+    }
+    return any;
+  }
+
+  /** Stop raking. Any fresh movement order implies it. */
+  ceaseFire(squadId: number): void {
+    const squad = this.squads[squadId];
+    if (!squad) return;
+    for (const u of this.membersOf(squad)) {
+      u.suppressAt = null;
+      u.suppressOrdered = false;
+    }
   }
 
   /** What the team has left, for the HUD and for deciding whether to offer it. */

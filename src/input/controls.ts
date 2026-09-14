@@ -19,6 +19,8 @@ export interface ControlCallbacks {
   onToggleCoverOverlay(): void;
   /** Throw something at the ground under the cursor. */
   onThrow(kind: 'frag' | 'smoke'): void;
+  /** Rake the ground under the cursor. */
+  onSuppress(): void;
 }
 
 /** Two right-clicks inside this window mean "run", not "walk". */
@@ -216,6 +218,7 @@ export class Controls {
     } else if (key === 'f') this.callbacks.onToggleCoverOverlay();
     else if (key === 'g') this.callbacks.onThrow('frag');
     else if (key === 't') this.callbacks.onThrow('smoke');
+    else if (key === 'r') this.callbacks.onSuppress();
     else if (key >= '1' && key <= '3') this.callbacks.onSelectSquadIndex(Number(key) - 1);
   };
 

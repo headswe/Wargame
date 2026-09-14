@@ -2,6 +2,7 @@ import { type Vec2, clamp, dist, distPointToSegment, invLerpClamped } from './ma
 import type { Rng } from './rng.ts';
 import type { Scene } from './world/scene.ts';
 import { MoveMode, Posture, UnitState, type Unit, eyeOf, isMoving, silhouetteOf } from './units.ts';
+import { Stature } from './world/occlusion.ts';
 
 /** Above this, an operator stops being a shooter and becomes a passenger. */
 export const PIN_THRESHOLD = 0.72;
@@ -148,6 +149,124 @@ export interface ShotOutcome {
   killedOrDowned: boolean;
 }
 
+/** How wide a beaten zone one man rakes when he cannot see what he is shooting at. */
+export const BEATEN_ZONE = 4.5;
+/** What a round is worth when nobody is aiming it. */
+const BLIND_FIRE = 0.13;
+
+/**
+ * A round fired at a piece of ground rather than at a man.
+ *
+ * This is what stops smoke and dead ground from being an off switch. Losing
+ * sight of someone does not end the exchange in real life — the muzzle stays
+ * on the last place you saw him and the rounds keep going, and the value of
+ * that is almost entirely the suppression, which the model already applies
+ * along the path rather than to a target. What makes it honest is that cover
+ * is still cover: the geometry is solved exactly as it is for aimed fire, so a
+ * man flat in a ditch inside the beaten zone is as safe as the ditch makes
+ * him. Only the aiming is taken away, and that is priced once, here, rather
+ * than twice by also counting the smoke that hid him.
+ */
+export function resolveAreaShot(
+  scene: Scene,
+  rng: Rng,
+  units: Unit[],
+  shooter: Unit,
+  aim: Vec2,
+  effects: Effect[],
+): void {
+  const range = dist(shooter.pos, aim);
+  // Each round goes somewhere slightly different. That spread is the beaten
+  // zone, and it is the reason area fire covers ground instead of a point.
+  const spread = 0.8 + range * 0.03;
+  const impact = {
+    x: aim.x + rng.gaussian() * spread,
+    y: aim.y + rng.gaussian() * spread,
+  };
+  const fromHeight = scene.heightAt(shooter.pos.x, shooter.pos.y) + eyeOf(shooter);
+  const impactHeight = scene.heightAt(impact.x, impact.y) + 0.5;
+
+  for (const u of units) {
+    if (u.state !== UnitState.Active || u.faction === shooter.faction) continue;
+    const off = dist(u.pos, impact);
+    if (off > BEATEN_ZONE) continue;
+
+    // Geometry only: the smoke that stopped him seeing is already paid for by
+    // BLIND_FIRE, and charging it again would make a canister bulletproof.
+    const sighting = scene.sightThroughSmoke(
+      { x: shooter.pos.x, y: shooter.pos.y, eye: eyeOf(shooter) },
+      { x: u.pos.x, y: u.pos.y, base: 0, top: silhouetteOf(u) },
+      shooter.weapon.maxRange,
+    );
+    if (!sighting.visible) continue;
+
+    let p = shooter.weapon.accuracy * BLIND_FIRE;
+    p *= rangeFactor(sighting.distance, shooter.weapon.optimalRange, shooter.weapon.maxRange);
+    p *= sighting.exposure;
+    p *= 1 - shooter.suppression * 0.78;
+    p *= (1 - off / BEATEN_ZONE) ** 2;
+    p *= targetMotionFactor(u);
+
+    if (!rng.chance(clamp(p, 0, 0.6))) continue;
+
+    const damage = shooter.weapon.damage * rng.range(0.85, 1.15);
+    u.hp -= damage;
+    u.suppression = clamp(u.suppression + 0.22, 0, 1);
+    let lethal = false;
+    if (u.hp <= 0) {
+      u.hp = 0;
+      u.state = UnitState.Down;
+      u.bleedout = 42;
+      u.path = [];
+      u.pathIndex = 0;
+      u.coverSpot = null;
+      u.slot = null;
+      lethal = true;
+    }
+    effects.push({
+      kind: 'hit', at: { ...u.pos },
+      height: scene.heightAt(u.pos.x, u.pos.y) + silhouetteOf(u) * 0.6,
+      targetId: u.id, lethal,
+    });
+    break;
+  }
+
+  effects.push({ kind: 'impact', at: impact, height: impactHeight });
+  effects.push({
+    kind: 'shot',
+    from: { ...shooter.pos },
+    fromHeight,
+    to: impact,
+    toHeight: impactHeight,
+    hit: false,
+    shooterId: shooter.id,
+    faction: shooter.faction,
+  });
+
+  scene.hit(impact.x, impact.y, shooter.weapon.damage);
+  applySuppressionAlong(units, shooter.pos, impact, shooter.faction, shooter.weapon.suppressionPower);
+}
+
+/**
+ * Whether a round fired at this patch of ground would get there at all.
+ *
+ * The test is against a man-sized column, not against the dirt. Asking whether
+ * the ground itself is visible is the wrong question and gives the wrong
+ * answer everywhere it matters: a gunner crouched behind his own sandbags can
+ * see the chest of a man at thirty metres and cannot see the earth under his
+ * boots, and it is the chest he is shooting at.
+ *
+ * Deliberately blind to smoke: raking a spot you know about through a cloud is
+ * the entire point. A wall in the way is a different matter, and stops it.
+ */
+export function canReach(scene: Scene, shooter: Unit, aim: Vec2): boolean {
+  if (dist(shooter.pos, aim) > shooter.weapon.maxRange) return false;
+  return scene.sightThroughSmoke(
+    { x: shooter.pos.x, y: shooter.pos.y, eye: eyeOf(shooter) },
+    { x: aim.x, y: aim.y, base: 0, top: Stature.standingTop },
+  ).visible;
+}
+
 /** Resolve one round. Misses still land somewhere, and that somewhere matters. */
 export function resolveShot(
   scene: Scene,
@@ -209,6 +328,5 @@ export function resolveShot(
   });
 
   applySuppressionAlong(units, shooter.pos, impact, shooter.faction, shooter.weapon.suppressionPower);
-  void dist;
   return { hit, impact, damage, killedOrDowned };
 }

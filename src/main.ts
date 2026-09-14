@@ -100,6 +100,7 @@ class Mission {
         this.hud.alert(on ? 'Cover overlay on' : 'Cover overlay off');
       },
       onThrow: (kind) => this.throwOrdnance(kind),
+      onSuppress: () => this.suppress(),
     });
 
     // Open looking at the start line, not at the middle of the map.
@@ -178,6 +179,19 @@ class Mission {
     if (thrown > 0) this.hud.alert(`${label} out`, 'info');
     else if (outOfStock === this.selected.size) this.hud.alert(`No ${label.toLowerCase()} left`, 'danger');
     else this.hud.alert(`${label}: too far, or no angle from there`, 'danger');
+  }
+
+  /** Hold and rake the ground under the cursor until ordered elsewhere. */
+  private suppress(): void {
+    if (!this.hover || this.selected.size === 0) return;
+    let any = false;
+    for (const id of this.selected) {
+      if (this.sim.suppressArea(id, this.hover)) any = true;
+    }
+    this.hud.alert(
+      any ? 'Suppressing' : 'No line to that ground from where they are',
+      any ? 'info' : 'danger',
+    );
   }
 
   private order(dest: Vec2, sprint: boolean, facing: number | null): void {
@@ -354,6 +368,8 @@ window.wargame = {
         state: u.state,
         mode: u.moveMode,
         pathLength: u.path.length,
+        ammo: u.ammoInMag,
+        raking: u.suppressAt !== null,
         hasSlot: u.slot !== null,
         inCover: u.coverSpot !== null,
         suppression: Number(u.suppression.toFixed(2)),

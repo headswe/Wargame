@@ -9,7 +9,8 @@ import {
   Faction, MoveMode, Posture, UnitState, type Unit, eyeOf, isMoving, silhouetteOf, speedOf,
 } from './units.ts';
 import {
-  type Effect, PIN_THRESHOLD, SUPPRESSION_DECAY, UNPIN_THRESHOLD, hitChance, resolveShot,
+  type Effect, PIN_THRESHOLD, SUPPRESSION_DECAY, UNPIN_THRESHOLD, canReach, hitChance,
+  resolveAreaShot, resolveShot,
 } from './combat.ts';
 import {
   type InFlight, FRAG_RADIUS, Ordnance, canThrow, dangerFrom, launch, spend, stockOf,
@@ -41,6 +42,10 @@ const TURN_RATE = 4.6;
 /** Muzzle must be within this of the target before a round goes out. */
 const AIM_TOLERANCE = 0.22;
 const MEMORY_LIFETIME = 20;
+/** How stale a contact may be before raking where he was is just noise. */
+const SUPPRESS_MEMORY = 7;
+/** Seconds of area fire one lost contact is worth, for an ordinary rifle. */
+const SUPPRESS_BURST = 4.5;
 
 /**
  * How conspicuous this operator is. A man sprinting across a courtyard grabs
@@ -127,7 +132,14 @@ function updateSenses(ctx: SimContext, u: Unit, dt: number): void {
 
     if (progress >= SPOT_ACQUIRE) {
       u.visible.push(other.id);
-      u.memory.set(other.id, { pos: { ...other.pos }, age: 0 });
+      // Only what was actually seen this tick updates the remembered position.
+      // Acquisition saturates and decays over a couple of seconds so contacts
+      // do not flicker, but letting that grace period keep writing ground truth
+      // meant a man who stepped behind a wall went on being tracked through it
+      // — and "last known position" would have been a last known position of
+      // nothing. Freezing it here is what makes both the ghosts on the map and
+      // the ground the enemy rakes honest.
+      if (view.seen) u.memory.set(other.id, { pos: { ...other.pos }, age: 0 });
     }
   }
 
@@ -285,7 +297,7 @@ function updateWeaponHandling(u: Unit, dt: number): void {
   u.lastShotAt += dt;
 }
 
-function tryFire(ctx: SimContext, u: Unit, target: Unit, dt: number): void {
+function tryFire(ctx: SimContext, u: Unit, aim: Vec2, target: Unit | null, dt: number): void {
   if (u.reloadTimer > 0) return;
   if (isMoving(u) && u.moveMode === MoveMode.Sprint) return;
   if (u.weaponReady < 0.4) return;
@@ -296,9 +308,9 @@ function tryFire(ctx: SimContext, u: Unit, target: Unit, dt: number): void {
     return;
   }
 
-  // Must be looking at them. This is what makes an unexpected flank hurt:
+  // Must be looking at it. This is what makes an unexpected flank hurt:
   // the half-second of turning is a half-second of not shooting back.
-  const desired = angleOf(sub(target.pos, u.pos));
+  const desired = angleOf(sub(aim, u.pos));
   if (Math.abs(angleDelta(u.facing, desired)) > AIM_TOLERANCE) return;
 
   if (u.posture === Posture.Pinned) {
@@ -314,7 +326,8 @@ function tryFire(ctx: SimContext, u: Unit, target: Unit, dt: number): void {
 
   if (u.fireCooldown > 0) return;
 
-  resolveShot(ctx.scene, ctx.rng, ctx.unitList, u, target, ctx.effects);
+  if (target) resolveShot(ctx.scene, ctx.rng, ctx.unitList, u, target, ctx.effects);
+  else resolveAreaShot(ctx.scene, ctx.rng, ctx.unitList, u, aim, ctx.effects);
   u.ammoInMag--;
   u.lastShotAt = 0;
   u.fireCooldown = 60 / u.weapon.rpm;
@@ -334,6 +347,8 @@ function updateFacing(u: Unit, target: Unit | null, dt: number): void {
 
   if (target) {
     desired = angleOf(sub(target.pos, u.pos));
+  } else if (u.suppressAt) {
+    desired = angleOf(sub(u.suppressAt, u.pos));
   } else if (isMoving(u) && u.moveMode === MoveMode.Sprint) {
     desired = angleOf(u.velocity);
   } else {
@@ -560,6 +575,56 @@ function considerGrenade(ctx: SimContext, u: Unit): void {
   }
 }
 
+/**
+ * Keep shooting at where he was.
+ *
+ * Without this, breaking line of sight ends the fight: a team that walks into
+ * smoke stops being shot at the instant it disappears, which turns a canister
+ * from a screen into invulnerability. A man who loses a contact keeps the
+ * muzzle on the last place he saw it and empties a magazine into that ground,
+ * which is both what actually happens and the thing that makes crossing under
+ * smoke a gamble rather than a formality.
+ */
+function updateAreaFire(ctx: SimContext, u: Unit, target: Unit | null): void {
+  // Something real to shoot at always wins over a guess.
+  if (target) {
+    u.suppressAt = null;
+    u.suppressOrdered = false;
+    return;
+  }
+  if (u.suppressAt) {
+    const stale = ctx.time > u.suppressUntil;
+    const cannot = u.posture === Posture.Pinned || isMoving(u)
+      || !canReach(ctx.scene, u, u.suppressAt);
+    if (stale || cannot) {
+      u.suppressAt = null;
+      u.suppressOrdered = false;
+    }
+    return;
+  }
+  if (u.suppressOrdered) return;
+  if (u.posture === Posture.Pinned || isMoving(u)) return;
+
+  // The freshest thing we have lost, if we have only just lost it.
+  let best: Vec2 | null = null;
+  let bestAge = SUPPRESS_MEMORY;
+  for (const [id, mem] of u.memory) {
+    if (mem.age >= bestAge) continue;
+    if (u.visible.includes(id)) continue;
+    const other = ctx.units.get(id);
+    if (!other || other.state !== UnitState.Active) continue;
+    if (!canReach(ctx.scene, u, mem.pos)) continue;
+    best = mem.pos;
+    bestAge = mem.age;
+  }
+  if (!best) return;
+
+  u.suppressAt = { ...best };
+  // A belt-fed is a movement-denial tool, so it holds the ground far longer
+  // than a rifleman does. That is the difference between the two weapons.
+  u.suppressUntil = ctx.time + SUPPRESS_BURST * (0.6 + u.weapon.suppressionPower * 0.5);
+}
+
 export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
   if (u.state === UnitState.Dead) return;
   if (u.state === UnitState.Down) {
@@ -577,13 +642,15 @@ export function updateUnit(ctx: SimContext, u: Unit, dt: number): void {
 
   const fleeing = avoidBlast(ctx, u);
   if (!fleeing) considerGrenade(ctx, u);
+  updateAreaFire(ctx, u, target);
   updateHostileInitiative(ctx, u);
   ensurePath(ctx, u, dt);
   stepMovement(ctx, u, dt);
   updateExposure(u, dt);
   updateFacing(u, target, dt);
 
-  if (target) tryFire(ctx, u, target, dt);
+  if (target) tryFire(ctx, u, target.pos, target, dt);
+  else if (u.suppressAt) tryFire(ctx, u, u.suppressAt, null, dt);
 }
 
 export function updateSquad(ctx: SimContext, squad: Squad): void {

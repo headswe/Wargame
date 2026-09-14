@@ -11,7 +11,7 @@ import { revetment } from '../src/sim/world/builder.ts';
 import { Fabric, Solidity } from '../src/sim/world/geometry.ts';
 import { Stature } from '../src/sim/world/occlusion.ts';
 import { Ordnance, canThrow, launch, updateOrdnance } from '../src/sim/ordnance.ts';
-import { hitChance } from '../src/sim/combat.ts';
+import { hitChance, resolveAreaShot } from '../src/sim/combat.ts';
 
 /** A man behind a sandbag revetment, and a man twenty metres out in the open. */
 function bench() {
@@ -238,5 +238,154 @@ test('hostiles grenade a position they cannot shoot into', () => {
   assert.ok(
     thrown,
     'a defender who knows where you are and cannot shoot you should reach for a grenade',
+  );
+});
+
+test('losing a contact does not end the exchange', () => {
+  const sim = new Sim(KILLING_GROUND, 9);
+  const defender = sim.unitList.find((u) => u.faction === Faction.Hostile)!;
+  const alpha = sim.playerSquads[0];
+  const mark = sim.membersOf(alpha)[0];
+
+  // Out in front of him, in the open, close enough to be seen.
+  for (const u of sim.membersOf(alpha)) {
+    u.pos = vec(28 + (u.id % 3), 45);
+    u.slot = null;
+    u.coverSpot = null;
+  }
+  defender.facing = -Math.PI / 2;
+  for (let t = 0; t < 4; t += 0.05) sim.update(0.05);
+  assert.ok(defender.visible.length > 0, 'he should have them in sight to begin with');
+
+  // Gone — behind smoke, and nothing new to see.
+  for (const u of sim.membersOf(alpha)) u.pos = vec(u.pos.x, 300);
+  sim.scene.smoke.add({ ...mark.pos }, 0, { radius: 12 });
+
+  let raked = 0;
+  for (let t = 0; t < 6; t += 0.05) {
+    sim.update(0.05);
+    if (defender.suppressAt) raked++;
+  }
+  assert.ok(raked > 20, 'he should keep the muzzle on where they were');
+
+  // But not forever: a lost contact buys a burst, not a career.
+  for (let t = 0; t < 14; t += 0.05) sim.update(0.05);
+  assert.equal(defender.suppressAt, null, 'area fire has to run out');
+});
+
+test('area fire still respects the cover it is fired into', () => {
+  // Two men the same distance from the same impact point, taking the same
+  // number of rounds: one in the open, one behind a revetment. Blind fire must
+  // not flatten the difference. Given enough hit points to absorb it, so what
+  // is measured is damage rather than who happened to die first.
+  const punish = (covered: boolean): number => {
+    resetUnitIds();
+    const scene = new Scene(80, 80);
+    // Ten metres short of the target, so three thousand rounds land beyond it
+    // rather than knocking it down — which they will happily do, and which
+    // would quietly turn this into a test of nothing.
+    if (covered) revetment(scene, [vec(20, 30), vec(60, 30)], Fabric.Sandbag, 1.6, 1.2);
+    scene.bake();
+
+    const shooter = makeUnit({
+      role: 'Automatic Rifleman', faction: Faction.Player, squadId: 0,
+      pos: vec(40, 12), weapon: WEAPONS.saw,
+    });
+    const target = makeUnit({
+      role: 'Rifleman', faction: Faction.Hostile, squadId: 1,
+      pos: vec(40, 40), weapon: WEAPONS.carbine, maxHp: 100000,
+    });
+    const units = [shooter, target];
+    const rng = new Rng(21);
+    for (let i = 0; i < 3000; i++) {
+      resolveAreaShot(scene, rng, units, shooter, { ...target.pos }, []);
+    }
+    return target.maxHp - target.hp;
+  };
+
+  const exposed = punish(false);
+  const behind = punish(true);
+  assert.ok(exposed > 200, `blind fire in the open only did ${exposed.toFixed(0)}`);
+  assert.ok(
+    behind < exposed * 0.5,
+    `cover barely helped: ${behind.toFixed(0)} behind a wall vs ${exposed.toFixed(0)} in the open`,
+  );
+});
+
+test('the player can rake ground, and a move order calls it off', () => {
+  const sim = new Sim(KILLING_GROUND, 4);
+  const alpha = sim.playerSquads[0];
+  for (const u of sim.membersOf(alpha)) {
+    u.pos = vec(28 + (u.id % 3), 50);
+    u.slot = null;
+    u.coverSpot = null;
+  }
+  for (let t = 0; t < 2; t += 0.05) sim.update(0.05);
+
+  // Nobody shooting back, so what is measured is the order rather than who
+  // got pinned first.
+  for (const u of sim.unitList) {
+    if (u.faction === Faction.Hostile) u.state = UnitState.Dead;
+  }
+  assert.ok(sim.suppressArea(alpha.id, vec(30, 26)), 'they have a line to it');
+  assert.ok(
+    sim.membersOf(alpha).filter((u) => u.suppressAt !== null).length >= 3,
+    'the team takes it up',
+  );
+
+  for (let t = 0; t < 3; t += 0.05) sim.update(0.05);
+  assert.ok(sim.membersOf(alpha).some((u) => u.suppressAt !== null), 'and holds it');
+
+  sim.orderSquad(alpha.id, vec(30, 60), MoveMode.Tactical, null);
+  assert.ok(
+    sim.membersOf(alpha).every((u) => u.suppressAt === null),
+    'being told to go somewhere ends being told to hold and shoot',
+  );
+
+  // And ground with a hill in the way is refused rather than silently ignored.
+  const blind = new Sim(KILLING_GROUND, 4);
+  const team = blind.playerSquads[0];
+  for (const u of blind.membersOf(team)) u.pos = vec(30, 100);
+  assert.equal(blind.suppressArea(team.id, vec(30, 24)), false, 'no line over the ridge');
+});
+
+test('smoke after contact costs more than smoke before it', () => {
+  const advance = (seed: number, mode: 'screened' | 'broken') => {
+    const sim = new Sim(KILLING_GROUND, seed);
+    const alpha = sim.playerSquads[0];
+    for (const other of [sim.playerSquads[1], sim.playerSquads[2]]) {
+      for (const u of sim.membersOf(other)) u.state = UnitState.Dead;
+    }
+    const pop = () => {
+      for (const y of [64, 54, 44]) {
+        sim.scene.smoke.add(vec(30, y), sim.scene.heightAt(30, y), { radius: 10 });
+      }
+    };
+
+    sim.orderSquad(alpha.id, vec(30, 82), MoveMode.Tactical, -Math.PI / 2);
+    for (let t = 0; t < 14; t += 0.05) sim.update(0.05);
+    if (mode === 'screened') {
+      pop();
+      for (let t = 0; t < 4; t += 0.05) sim.update(0.05);
+    }
+
+    sim.orderSquad(alpha.id, vec(30, 42), MoveMode.Sprint, null);
+    for (let t = 0; t < 26; t += 0.05) {
+      sim.update(0.05);
+      if (mode === 'broken' && Math.abs(t - 4.5) < 0.03) pop();
+    }
+    return sim.membersOf(alpha).filter((u) => u.state === UnitState.Active).length;
+  };
+
+  let screened = 0;
+  let broken = 0;
+  for (const seed of [1, 2, 3]) {
+    screened += advance(seed, 'screened');
+    broken += advance(seed, 'broken');
+  }
+  assert.ok(screened >= 9, `screening before contact should work: only ${screened}/12 survived`);
+  assert.ok(
+    broken < screened,
+    `popping smoke once already seen must cost something: ${broken}/12 vs ${screened}/12`,
   );
 });
