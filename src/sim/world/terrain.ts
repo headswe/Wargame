@@ -51,6 +51,9 @@ export interface ShapeOptions {
   curve?: boolean;
 }
 
+/** The value that means "this cell has no opinion about the ground". */
+export const SURFACE_KEEP = 255;
+
 export interface Bounds {
   minX: number;
   minY: number;
@@ -301,6 +304,32 @@ export class Terrain {
         const h = base + scale * sample(i / (this.cols - 1), j / (this.rows - 1));
         const index = this.index(i, j);
         this.heights[index] = add ? this.heights[index] + h : h;
+      }
+    }
+    this.mark(0, 0, this.width, this.height);
+    return this;
+  }
+
+  /**
+   * Lay down painted ground from a coarse grid, leaving anything marked
+   * untouched alone.
+   *
+   * The companion to `heightmap`, and for the same reason: broad rectangles
+   * express a ploughed field perfectly and a muddy track round the back of a
+   * barn not at all. `SURFACE_KEEP` is the "no opinion" value, which is what
+   * makes this composable with the rectangles rather than a replacement for
+   * them — a brush stroke is a sparse overlay, not a new ground layer.
+   */
+  surfacemap(grid: { cols: number; rows: number; cells: ArrayLike<number> }): this {
+    const { cols, rows, cells } = grid;
+    if (cols < 2 || rows < 2) return this;
+    for (let j = 0; j < this.rows; j++) {
+      const gy = Math.round((j / (this.rows - 1)) * (rows - 1));
+      for (let i = 0; i < this.cols; i++) {
+        const gx = Math.round((i / (this.cols - 1)) * (cols - 1));
+        const value = cells[gy * cols + gx];
+        if (value === SURFACE_KEEP) continue;
+        this.surface[this.index(i, j)] = value;
       }
     }
     this.mark(0, 0, this.width, this.height);

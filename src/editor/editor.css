@@ -94,3 +94,8 @@ select { padding: 1px 4px; }
 
 textarea { font: inherit; color: var(--text); background: #232a2e; border: 1px solid var(--edge);
   border-radius: 2px; padding: 3px 6px; width: 100%; resize: vertical; }
+
+#palette .row { font-size: 11px; padding: 2px 4px; }
+#palette .row .kind { cursor: pointer; }
+#palette .row .kind:hover { color: var(--danger); }
+#palette button { margin-top: 3px; font-size: 11px; }

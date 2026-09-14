@@ -195,6 +195,43 @@ export class EditorDoc {
     return scene;
   }
 
+  // --------------------------------------------------------------- ordering
+
+  /**
+   * Move an operation within its own list.
+   *
+   * Order is not presentation here: operations apply in sequence, so a road
+   * laid before a ditch is cut through by it and one laid after rides over it.
+   * An author who cannot reorder them cannot express the second case at all,
+   * and will assume the tool is broken rather than that the list is a program.
+   */
+  reorder(id: string, delta: number): void {
+    const list: AnyOp[] = this.data.terrain.some((op) => op.id === id)
+      ? this.data.terrain : this.data.structures;
+    const from = list.findIndex((op) => op.id === id);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(list.length - 1, from + delta));
+    if (to === from) return;
+    this.edit('reorder', () => {
+      const [op] = list.splice(from, 1);
+      list.splice(to, 0, op);
+    });
+  }
+
+  /** Drop an operation at an exact place in its list, for drag-and-drop. */
+  moveTo(id: string, index: number): void {
+    const list: AnyOp[] = this.data.terrain.some((op) => op.id === id)
+      ? this.data.terrain : this.data.structures;
+    const from = list.findIndex((op) => op.id === id);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(list.length - 1, index));
+    if (to === from) return;
+    this.edit('reorder', () => {
+      const [op] = list.splice(from, 1);
+      list.splice(to, 0, op);
+    });
+  }
+
   // -------------------------------------------------------------------- io
 
   toJSON(): string {

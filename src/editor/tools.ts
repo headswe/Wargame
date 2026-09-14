@@ -1,7 +1,7 @@
 import type { Vec2 } from '../sim/math.ts';
 import { Fabric } from '../sim/world/geometry.ts';
-import type { Opening, StructureOp, TerrainOp } from '../sim/world/level-data.ts';
-import { Surface } from '../sim/world/terrain.ts';
+import { type Opening, type StructureOp, type TerrainOp, packRuns, unpackRuns } from '../sim/world/level-data.ts';
+import { SURFACE_KEEP, Surface } from '../sim/world/terrain.ts';
 import type { AnyOp, EditorDoc } from './document.ts';
 import {
   boundsOf, centreOf, distanceTo, handlesOf, moveHandle, outlineOf, rotate, translate,
@@ -13,7 +13,8 @@ export type ToolId =
   | 'wall' | 'building' | 'revetment' | 'hedgerow' | 'obstacle'
   | 'road' | 'cut' | 'bank' | 'mound' | 'crater' | 'paint'
   | 'sculpt'
-  | 'spawn-team' | 'spawn-enemy' | 'spawn-objective';
+  | 'spawn-team' | 'spawn-enemy' | 'spawn-objective'
+  | 'measure' | 'probe' | 'surface' | 'stamp';
 
 /** Which tools collect a run of points before they make anything. */
 const DRAFTED: Partial<Record<ToolId, { points: number; op: AnyOp['op'] }>> = {
@@ -34,6 +35,7 @@ export interface Defaults {
   featureDepth: number;
   brushRadius: number;
   brushStrength: number;
+  brushMode: 'raise' | 'smooth' | 'flatten';
   team: number;
   heavy: boolean;
   doors: boolean;
@@ -47,6 +49,10 @@ export interface ToolHostOptions {
   snap: () => number;
   status: (message: string) => void;
   changed: () => void;
+  /** Ask for a sightline fan from here, or clear it when given null. */
+  probe: (at: Vec2 | null) => void;
+  /** Put the armed prefab down here. Returns false when nothing is armed. */
+  stamp: (at: Vec2, turn: number) => boolean;
 }
 
 type Drag =
@@ -57,7 +63,8 @@ type Drag =
   | { kind: 'box'; from: Vec2; to: Vec2 }
   | { kind: 'radius'; op: AnyOp }
   | { kind: 'rect'; from: Vec2; to: Vec2; makes: 'building' | 'paint' }
-  | { kind: 'sculpt'; down: boolean };
+  | { kind: 'sculpt'; down: boolean }
+  | { kind: 'surface'; down: boolean };
 
 /**
  * Everything the pointer does, in one place.
@@ -73,6 +80,10 @@ export class ToolHost {
   /** Points collected so far by a drafting tool. */
   draft: Vec2[] = [];
   box: { from: Vec2; to: Vec2 } | null = null;
+  /** The tape measure's two ends, once the author has put them down. */
+  tape: Vec2[] = [];
+  /** How far round the armed prefab is turned, in radians. */
+  stampTurn = 0;
 
   private drag: Drag = { kind: 'none' };
   private cursor: Vec2 = { x: 0, y: 0 };
@@ -82,6 +93,8 @@ export class ToolHost {
   setTool(tool: ToolId): void {
     this.tool = tool;
     this.draft = [];
+    if (tool !== 'measure') this.tape = [];
+    if (tool !== 'probe') this.o.probe(null);
     this.drag = { kind: 'none' };
     this.o.status(HINTS[tool] ?? '');
     this.o.changed();
@@ -94,9 +107,34 @@ export class ToolHost {
     this.cursor = at;
     const { doc } = this.o;
 
+    if (this.tool === 'measure') {
+      if (this.tape.length >= 2) this.tape = [];
+      this.tape.push(at);
+      this.o.changed();
+      return;
+    }
+
+    if (this.tool === 'probe') {
+      this.o.probe(at);
+      return;
+    }
+
+    if (this.tool === 'stamp') {
+      if (!this.o.stamp(this.snapped(at), this.stampTurn)) {
+        this.o.status('pick a piece from the palette first');
+      }
+      return;
+    }
+
     if (this.tool === 'sculpt') {
       this.drag = { kind: 'sculpt', down: true };
       this.sculptAt(at, mods.alt);
+      return;
+    }
+
+    if (this.tool === 'surface') {
+      this.drag = { kind: 'surface', down: true };
+      this.paintAt(at, mods.alt);
       return;
     }
 
@@ -194,6 +232,9 @@ export class ToolHost {
       case 'sculpt':
         if (this.drag.down) this.sculptAt(at, mods.alt);
         return;
+      case 'surface':
+        if (this.drag.down) this.paintAt(at, mods.alt);
+        return;
       default:
         break;
     }
@@ -252,6 +293,10 @@ export class ToolHost {
         doc.edit('sculpt', () => {});
         doc.refresh();
         break;
+      case 'surface':
+        doc.edit('paint ground', () => {});
+        doc.refresh();
+        break;
       default:
         break;
     }
@@ -274,6 +319,11 @@ export class ToolHost {
     }
     if (event.key === 'Delete' || event.key === 'Backspace') {
       this.deleteSelection();
+      return true;
+    }
+    if ((event.key === '[' || event.key === ']') && this.tool === 'stamp') {
+      this.stampTurn += (event.key === ']' ? 1 : -1) * Math.PI / 12;
+      this.o.status(`piece turned ${Math.round(this.stampTurn * 57)}\u00b0`);
       return true;
     }
     if (event.key === '[' || event.key === ']') {
@@ -502,12 +552,25 @@ export class ToolHost {
     const j0 = Math.max(0, Math.floor((at.y - radius) / stepY));
     const j1 = Math.min(grid.rows - 1, Math.ceil((at.y + radius) / stepY));
 
+    // Smoothing and flattening both pull towards a target rather than adding to
+    // what is there: a brush that only ever adds can raise ground but can never
+    // tidy it, and tidying is most of sculpting.
+    const mode = d.brushMode;
+    const target = mode === 'flatten'
+      ? sampleGrid(grid, at.x / stepX, at.y / stepY) : 0;
+
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const dist = Math.hypot(i * stepX - at.x, j * stepY - at.y);
         if (dist > radius) continue;
         const falloff = 0.5 + 0.5 * Math.cos((dist / radius) * Math.PI);
-        grid.heights[j * grid.cols + i] += amount * falloff;
+        const k = j * grid.cols + i;
+        if (mode === 'raise') {
+          grid.heights[k] += amount * falloff;
+        } else {
+          const towards = mode === 'flatten' ? target : neighbourMean(grid, i, j);
+          grid.heights[k] += (towards - grid.heights[k]) * Math.min(1, falloff * 0.35);
+        }
       }
     }
 
@@ -519,17 +582,84 @@ export class ToolHost {
     const ci1 = Math.min(t.cols - 1, Math.ceil((at.x + pad) / t.spacing));
     const cj0 = Math.max(0, Math.floor((at.y - pad) / t.spacing));
     const cj1 = Math.min(t.rows - 1, Math.ceil((at.y + pad) / t.spacing));
-    for (let j = cj0; j <= cj1; j++) {
-      for (let i = ci0; i <= ci1; i++) {
-        const dist = Math.hypot(i * t.spacing - at.x, j * t.spacing - at.y);
-        if (dist > radius) continue;
-        const falloff = 0.5 + 0.5 * Math.cos((dist / radius) * Math.PI);
-        t.heights[j * t.cols + i] += amount * falloff;
+    if (mode === 'raise') {
+      for (let j = cj0; j <= cj1; j++) {
+        for (let i = ci0; i <= ci1; i++) {
+          const dist = Math.hypot(i * t.spacing - at.x, j * t.spacing - at.y);
+          if (dist > radius) continue;
+          const falloff = 0.5 + 0.5 * Math.cos((dist / radius) * Math.PI);
+          t.heights[j * t.cols + i] += amount * falloff;
+        }
+      }
+      scene.dirtyTerrain.push({
+        minX: at.x - pad, minY: at.y - pad, maxX: at.x + pad, maxY: at.y + pad,
+      });
+    } else {
+      // Smoothing reads from the control grid rather than from the live field,
+      // so the preview cannot drift away from what will be rebuilt.
+      for (let j = cj0; j <= cj1; j++) {
+        for (let i = ci0; i <= ci1; i++) {
+          const x = i * t.spacing;
+          const y = j * t.spacing;
+          if (Math.hypot(x - at.x, y - at.y) > radius) continue;
+          t.heights[j * t.cols + i] = sampleGrid(grid, x / stepX, y / stepY)
+            + (t.heights[j * t.cols + i] - sampleGrid(grid, x / stepX, y / stepY));
+        }
+      }
+      scene.dirtyTerrain.push({
+        minX: at.x - pad, minY: at.y - pad, maxX: at.x + pad, maxY: at.y + pad,
+      });
+    }
+    this.o.changed();
+  }
+
+  /**
+   * Brush the ground a different material.
+   *
+   * Strokes land in a sparse overlay grid that sits after the broad rectangles
+   * in the operation list, so a painted track can wander across a ploughed
+   * field without either of them having to know about the other.
+   */
+  private paintAt(at: Vec2, erase: boolean): void {
+    const { doc } = this.o;
+    const d = this.o.defaults();
+    const grid = ensureSurfaceGrid(doc);
+    const scene = doc.scene;
+
+    const stepX = doc.data.size.width / (grid.cols - 1);
+    const stepY = doc.data.size.height / (grid.rows - 1);
+    const radius = d.brushRadius;
+    const value = erase ? SURFACE_KEEP : d.surface;
+
+    const i0 = Math.max(0, Math.floor((at.x - radius) / stepX));
+    const i1 = Math.min(grid.cols - 1, Math.ceil((at.x + radius) / stepX));
+    const j0 = Math.max(0, Math.floor((at.y - radius) / stepY));
+    const j1 = Math.min(grid.rows - 1, Math.ceil((at.y + radius) / stepY));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        if (Math.hypot(i * stepX - at.x, j * stepY - at.y) > radius) continue;
+        grid.cells[j * grid.cols + i] = value;
       }
     }
-    scene.dirtyTerrain.push({
-      minX: at.x - pad, minY: at.y - pad, maxX: at.x + pad, maxY: at.y + pad,
-    });
+    grid.op.runs = packRuns(grid.cells);
+
+    // And straight onto the live field, so the brush feels like a brush.
+    if (!erase) {
+      const t = scene.terrain;
+      const ci0 = Math.max(0, Math.floor((at.x - radius) / t.spacing));
+      const ci1 = Math.min(t.cols - 1, Math.ceil((at.x + radius) / t.spacing));
+      const cj0 = Math.max(0, Math.floor((at.y - radius) / t.spacing));
+      const cj1 = Math.min(t.rows - 1, Math.ceil((at.y + radius) / t.spacing));
+      for (let j = cj0; j <= cj1; j++) {
+        for (let i = ci0; i <= ci1; i++) {
+          if (Math.hypot(i * t.spacing - at.x, j * t.spacing - at.y) > radius) continue;
+          t.surface[j * t.cols + i] = value;
+        }
+      }
+      scene.dirtyTerrain.push({
+        minX: at.x - radius, minY: at.y - radius, maxX: at.x + radius, maxY: at.y + radius,
+      });
+    }
     this.o.changed();
   }
 
@@ -601,7 +731,13 @@ export class ToolHost {
         closed: true,
       });
     }
-    if (this.tool === 'sculpt') {
+    if (this.tape.length > 0) {
+      runs.push({
+        points: this.tape.length >= 2 ? this.tape : [this.tape[0], this.cursor],
+        closed: false,
+      });
+    }
+    if (this.tool === 'sculpt' || this.tool === 'surface') {
       const r = this.o.defaults().brushRadius;
       runs.push({
         points: Array.from({ length: 32 }, (_, i) => {
@@ -648,6 +784,54 @@ function ensureSculptGrid(doc: EditorDoc): {
   return grid as { cols: number; rows: number; heights: number[] };
 }
 
+/** Bilinear read from the sculpt grid, in grid coordinates. */
+function sampleGrid(
+  grid: { cols: number; rows: number; heights: number[] }, gx: number, gy: number,
+): number {
+  const i = Math.max(0, Math.min(grid.cols - 1, Math.round(gx)));
+  const j = Math.max(0, Math.min(grid.rows - 1, Math.round(gy)));
+  return grid.heights[j * grid.cols + i];
+}
+
+function neighbourMean(
+  grid: { cols: number; rows: number; heights: number[] }, i: number, j: number,
+): number {
+  let total = 0;
+  let n = 0;
+  for (let dj = -1; dj <= 1; dj++) {
+    for (let di = -1; di <= 1; di++) {
+      const x = i + di;
+      const y = j + dj;
+      if (x < 0 || y < 0 || x >= grid.cols || y >= grid.rows) continue;
+      total += grid.heights[y * grid.cols + x];
+      n++;
+    }
+  }
+  return n === 0 ? 0 : total / n;
+}
+
+/** The painted overlay, created the first time somebody picks up the brush. */
+function ensureSurfaceGrid(doc: EditorDoc): {
+  op: TerrainOp & { op: 'surfacemap' }; cols: number; rows: number; cells: Uint8Array;
+} {
+  const spacing = 1.5;
+  const cols = Math.max(2, Math.round(doc.data.size.width / spacing) + 1);
+  const rows = Math.max(2, Math.round(doc.data.size.height / spacing) + 1);
+  let op = doc.data.terrain.find(
+    (o): o is TerrainOp & { op: 'surfacemap' } => o.op === 'surfacemap' && o.name === 'painted',
+  );
+  if (!op || op.cols !== cols || op.rows !== rows) {
+    op = {
+      op: 'surfacemap', name: 'painted', cols, rows,
+      runs: packRuns(new Uint8Array(cols * rows).fill(SURFACE_KEEP)),
+    };
+    // Last, so a brush stroke wins over the broad rectangles beneath it — which
+    // is the order anybody painting expects, and the only one worth having.
+    doc.data.terrain.push(op);
+  }
+  return { op, cols, rows, cells: unpackRuns(op.runs, cols * rows) };
+}
+
 function middleOf(ops: AnyOp[]): Vec2 {
   const centres = ops.map(centreOf);
   return {
@@ -675,4 +859,8 @@ const HINTS: Partial<Record<ToolId, string>> = {
   'spawn-team': 'click to place an operator',
   'spawn-enemy': 'click to place a defender',
   'spawn-objective': 'click to place the objective',
+  surface: 'drag to paint the ground · hold Alt to lift the paint off',
+  stamp: 'click to put the piece down \u00b7 [ and ] turn it',
+  measure: 'click two points to measure between them',
+  probe: 'click anywhere to see what a man standing there can see',
 };

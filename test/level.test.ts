@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import { dist, spline, vec } from '../src/sim/math.ts';
 import { Scene } from '../src/sim/world/scene.ts';
 import { Stature } from '../src/sim/world/occlusion.ts';
-import { SURFACE, Surface } from '../src/sim/world/terrain.ts';
+import { SURFACE, SURFACE_KEEP, Surface } from '../src/sim/world/terrain.ts';
 import { building, rect, wall } from '../src/sim/world/builder.ts';
 import { Fabric } from '../src/sim/world/geometry.ts';
-import { type LevelData, applyLevel } from '../src/sim/world/level-data.ts';
+import {
+  type LevelData, LEVEL_FORMAT, applyLevel, migrate, packRuns, unpackRuns, validateLevel,
+} from '../src/sim/world/level-data.ts';
 import { STEPOVE_DATA } from '../src/sim/levels.ts';
 import { Faction, MoveMode, WEAPONS, makeUnit, resetUnitIds, speedOf } from '../src/sim/units.ts';
 
@@ -248,4 +250,87 @@ test('a level that asks for something that does not exist says so', () => {
   // Skipping it quietly is the worst option: the level loads, the ditch is
   // missing, and the mission is subtly unwinnable for reasons nothing reports.
   assert.throws(() => applyLevel(scene, broken), /unknown terrain op erode/);
+});
+
+test('painted ground survives being run-length encoded', () => {
+  const cols = 40;
+  const rows = 30;
+  const cells = new Uint8Array(cols * rows).fill(SURFACE_KEEP);
+  for (let j = 8; j < 20; j++) {
+    for (let i = 5; i < 30; i++) cells[j * cols + i] = Surface.Mud;
+  }
+  const runs = packRuns(cells);
+  const back = unpackRuns(runs, cols * rows);
+
+  assert.deepEqual([...back], [...cells], 'it came back different');
+  // The point of the encoding: a mostly-untouched map must not cost a file.
+  assert.ok(
+    runs.length < cells.length / 20,
+    `${runs.length} numbers to describe ${cells.length} cells`,
+  );
+});
+
+test('a brushed surface only changes what it was brushed onto', () => {
+  const scene = new Scene(60, 60);
+  scene.terrain.paint(vec(0, 0), vec(60, 60), Surface.Grass);
+
+  const cols = 21;
+  const rows = 21;
+  const cells = new Uint8Array(cols * rows).fill(SURFACE_KEEP);
+  // A patch over the middle, in grid coordinates.
+  for (let j = 8; j <= 12; j++) {
+    for (let i = 8; i <= 12; i++) cells[j * cols + i] = Surface.Mud;
+  }
+  scene.terrain.surfacemap({ cols, rows, cells });
+
+  assert.equal(scene.terrain.surfaceAt(30, 30), Surface.Mud, 'the middle should be mud');
+  assert.equal(scene.terrain.surfaceAt(3, 3), Surface.Grass, 'the corner should be untouched');
+});
+
+test('a level file from an older build still opens', () => {
+  // No version, no ids: exactly what the first data levels were written as.
+  const old = {
+    id: 'old', name: 'Old', brief: '',
+    size: { width: 60, height: 60 },
+    terrain: [{ op: 'rolling', amplitude: 1, wavelength: 20 }],
+    structures: [{ op: 'obstacle', at: { x: 30, y: 30 }, radius: 2 }],
+    spawns: { teams: [[{ x: 10, y: 50 }]], enemies: [], objectives: [{ x: 30, y: 10 }] },
+  };
+  const level = migrate(JSON.parse(JSON.stringify(old)));
+
+  assert.equal(level.version, LEVEL_FORMAT);
+  assert.ok(level.terrain[0].id, 'every operation should come out with a handle on it');
+  assert.ok(level.structures[0].id);
+  assert.notEqual(level.terrain[0].id, level.structures[0].id, 'and they must differ');
+
+  // And a file from the future is refused rather than half-read.
+  assert.throws(
+    () => migrate({ ...old, version: LEVEL_FORMAT + 5 }),
+    /newer build/,
+  );
+});
+
+test('a level is checked over rather than thrown out', () => {
+  const broken: LevelData = {
+    version: LEVEL_FORMAT,
+    id: 'broken', name: 'Broken', brief: '',
+    size: { width: 60, height: 60 },
+    terrain: [{ op: 'cut', path: [vec(10, 10)], width: 4, depth: 1 }],
+    structures: [
+      { op: 'building', rect: { at: vec(30, 30), width: 10, depth: 8 },
+        openings: [{ side: 9, at: 'centre', width: 1.2, kind: 'door' }] },
+    ],
+    spawns: { teams: [], enemies: [], objectives: [] },
+  };
+  const problems = validateLevel(broken);
+
+  // Every one of them, not whichever was found first: an author fixing a level
+  // needs the list, and an editor has to be able to show work in progress.
+  const messages = problems.map((p) => p.message).join(' | ');
+  assert.ok(problems.length >= 4, `only found ${problems.length}: ${messages}`);
+  assert.ok(/at least 2 points/.test(messages), 'the one-point ditch');
+  assert.ok(/does not exist/.test(messages), 'the door on a wall that is not there');
+  assert.ok(/at least one team/.test(messages), 'nobody starts here');
+  assert.ok(/no objective/.test(messages), 'nothing to take');
+  assert.ok(problems.every((p) => p.where && p.severity), 'every problem says where and how bad');
 });

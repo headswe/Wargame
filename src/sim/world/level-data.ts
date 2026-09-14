@@ -67,6 +67,14 @@ export type TerrainOp = OpMeta & (
   | { op: 'cut'; path: Vec2[]; width: number; depth: number; surface?: Surface; curve?: boolean }
   | { op: 'road'; path: Vec2[]; width: number; surface?: Surface; curve?: boolean }
   | { op: 'paint'; min: Vec2; max: Vec2; surface: Surface }
+  /**
+   * Painted ground, run-length encoded.
+   *
+   * Stored as flat [value, count, value, count, ...] because a brushed map is
+   * overwhelmingly "no opinion" and a plain array of ten thousand 255s is
+   * forty kilobytes of nothing in every saved file.
+   */
+  | { op: 'surfacemap'; cols: number; rows: number; runs: number[] }
   | { op: 'crater'; at: Vec2; radius: number; depth: number });
 
 export type StructureOp = OpMeta & (
@@ -156,6 +164,11 @@ export function defineLevel(data: LevelData): LevelDef {
  */
 export function applyLevel(scene: Scene, data: LevelData): void {
   for (const step of data.terrain) {
+    // Muted operations stay in the file and out of the world. That is what
+    // makes "hide the hedges and look again" a thing an author can do, and it
+    // has to be honoured here rather than only in the editor's viewport, or the
+    // simulation goes on seeing what the author has switched off.
+    if (step.muted) continue;
     switch (step.op) {
       case 'heightmap':
         scene.terrain.heightmap(step, step);
@@ -178,6 +191,11 @@ export function applyLevel(scene: Scene, data: LevelData): void {
       case 'paint':
         scene.terrain.paint(step.min, step.max, step.surface);
         break;
+      case 'surfacemap':
+        scene.terrain.surfacemap({
+          cols: step.cols, rows: step.rows, cells: unpackRuns(step.runs, step.cols * step.rows),
+        });
+        break;
       case 'crater':
         scene.terrain.crater(step.at, step.radius, step.depth);
         break;
@@ -187,6 +205,7 @@ export function applyLevel(scene: Scene, data: LevelData): void {
   }
 
   for (const step of data.structures) {
+    if (step.muted) continue;
     switch (step.op) {
       case 'building': {
         const footprint = step.footprint
@@ -303,7 +322,9 @@ export interface Problem {
   message: string;
 }
 
-const TERRAIN_OPS = new Set(['heightmap', 'rolling', 'mound', 'bank', 'cut', 'road', 'paint', 'crater']);
+const TERRAIN_OPS = new Set([
+  'heightmap', 'rolling', 'mound', 'bank', 'cut', 'road', 'paint', 'crater', 'surfacemap',
+]);
 const STRUCTURE_OPS = new Set(['building', 'wall', 'revetment', 'hedgerow', 'obstacle']);
 
 /**
@@ -359,6 +380,19 @@ export function validateLevel(data: LevelData): Problem[] {
           say('error', where, `grid is ${op.cols}x${op.rows} but carries ${op.heights.length} heights`);
         }
         break;
+      case 'surfacemap': {
+        if (!(op.cols >= 2) || !(op.rows >= 2)) {
+          say('error', where, 'needs a grid of at least 2x2');
+          break;
+        }
+        let covered = 0;
+        for (let i = 1; i < op.runs.length; i += 2) covered += op.runs[i];
+        if (covered !== op.cols * op.rows) {
+          say('error', where,
+            `grid is ${op.cols}x${op.rows} but its runs cover ${covered} cells`);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -442,4 +476,37 @@ function checkOpening(
   } else if (opening.at - opening.width / 2 < 0 || opening.at + opening.width / 2 > length) {
     say('warning', where, 'an opening runs off the end of its wall');
   }
+}
+
+
+// ------------------------------------------------------------- run lengths
+
+/** Flatten a grid to [value, count, ...] pairs. */
+export function packRuns(cells: ArrayLike<number>): number[] {
+  const runs: number[] = [];
+  let value = cells[0];
+  let count = 0;
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i] === value) {
+      count++;
+      continue;
+    }
+    runs.push(value, count);
+    value = cells[i];
+    count = 1;
+  }
+  if (count > 0) runs.push(value, count);
+  return runs;
+}
+
+/** And back again. A short or long run list is padded or truncated, not trusted. */
+export function unpackRuns(runs: number[], length: number): Uint8Array {
+  const cells = new Uint8Array(length).fill(255);
+  let at = 0;
+  for (let i = 0; i + 1 < runs.length; i += 2) {
+    const value = runs[i];
+    const count = runs[i + 1];
+    for (let k = 0; k < count && at < length; k++) cells[at++] = value;
+  }
+  return cells;
 }

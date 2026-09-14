@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Scene as SimScene } from '../sim/world/scene.ts';
 import { Stature } from '../sim/world/occlusion.ts';
 import type { LevelData } from '../sim/world/level-data.ts';
+import type { Vec2 } from '../sim/math.ts';
 
 export type OverlayMode = 'none' | 'walkable' | 'fire' | 'cover';
 
@@ -183,5 +184,83 @@ export class Overlays {
     if (this.seenBy[k] === 0) return false;
     out.setHSL(THREE.MathUtils.lerp(0.33, 0.0, e), 0.75, 0.45);
     return true;
+  }
+}
+
+/**
+ * What one man standing on one spot can actually see.
+ *
+ * The question a designer asks continually and cannot answer by looking: put a
+ * gun here and what does it hold? A fan drawn from the simulation's own
+ * sightlines answers it in a way no amount of rotating the camera does, and it
+ * is how you find out that the wall you were proud of also blinds the position
+ * behind it.
+ */
+export class SightProbe {
+  readonly mesh: THREE.Mesh;
+  at: Vec2 | null = null;
+  /** Metres of ground the position holds, as a fraction of the circle it could. */
+  reach = 0;
+
+  constructor() {
+    this.mesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        color: 0xffe9a8, transparent: true, opacity: 0.22,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
+    );
+    this.mesh.renderOrder = 6;
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+  }
+
+  clear(): void {
+    this.at = null;
+    this.mesh.visible = false;
+  }
+
+  /** Cast the fan from `at`, out to `range` metres. */
+  cast(scene: SimScene, at: Vec2, range = 140): void {
+    this.at = at;
+    const bearings = 240;
+    const step = 2;
+    const eye = { x: at.x, y: at.y, eye: Stature.crouchedEye };
+    const edge: Vec2[] = [];
+    let total = 0;
+
+    for (let b = 0; b < bearings; b++) {
+      const angle = (b / bearings) * Math.PI * 2;
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      let reached = 0;
+      for (let d = step; d <= range; d += step) {
+        const x = at.x + dx * d;
+        const y = at.y + dy * d;
+        if (x < 0 || y < 0 || x > scene.width || y > scene.height) break;
+        // A man standing there, which is what the position is actually for.
+        if (!scene.sight(eye, { x, y, base: 0, top: Stature.standingTop }).visible) break;
+        reached = d;
+      }
+      total += reached;
+      edge.push({ x: at.x + dx * reached, y: at.y + dy * reached });
+    }
+    this.reach = total / bearings;
+
+    const position: number[] = [];
+    const lift = 0.16;
+    for (let i = 0; i < edge.length; i++) {
+      const a = edge[i];
+      const b = edge[(i + 1) % edge.length];
+      position.push(at.x, scene.heightAt(at.x, at.y) + lift, at.y);
+      position.push(a.x, scene.heightAt(a.x, a.y) + lift, a.y);
+      position.push(b.x, scene.heightAt(b.x, b.y) + lift, b.y);
+    }
+
+    this.mesh.geometry.dispose();
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+    this.mesh.geometry = geometry;
+    this.mesh.visible = true;
   }
 }

@@ -147,9 +147,129 @@ const roundTrip = await page.evaluate(() => {
 check('it still writes a level file', roundTrip.version >= 1 && roundTrip.structures > 10,
   `${(roundTrip.bytes / 1024).toFixed(1)}kB, format ${roundTrip.version}`);
 
+// --- painting the ground
+await page.keyboard.press('u');
+const surfaceBefore = await page.evaluate(() => window.editor.doc.scene.terrain.surfaceAt(60, 100));
+await dragWorld(52, 100, 70, 100);
+const surfaceAfter = await page.evaluate(() => window.editor.doc.scene.terrain.surfaceAt(60, 100));
+const painted = await page.evaluate(() =>
+  window.editor.doc.data.terrain.filter((op) => op.op === 'surfacemap').length);
+check('the surface brush paints', surfaceAfter !== surfaceBefore && painted === 1,
+  `${surfaceBefore} → ${surfaceAfter}, ${painted} overlay`);
+
+// --- and the painted overlay stays small in the file
+const encoded = await page.evaluate(() => {
+  const op = window.editor.doc.data.terrain.find((o) => o.op === 'surfacemap');
+  return { runs: op.runs.length, cells: op.cols * op.rows };
+});
+check('painted ground is encoded, not spelled out',
+  encoded.runs < encoded.cells / 10,
+  `${encoded.runs} numbers for ${encoded.cells} cells`);
+
+// --- the sightline probe
+await page.keyboard.press('q');
+const probeAt = await at(103, 63);
+await page.mouse.click(probeAt.x, probeAt.y);
+await page.waitForTimeout(1200);
+const reach = await page.evaluate(() => window.editor.probe.reach);
+check('the sightline probe measures what a position holds', reach > 5 && reach < 140,
+  `${reach.toFixed(0)}m of ground from the gun position`);
+await page.screenshot({ path: `${OUT}/editor-probe.png` });
+
+// --- measuring
+await page.keyboard.press('x');
+const m1 = await at(20, 100);
+const m2 = await at(60, 100);
+await page.mouse.click(m1.x, m1.y);
+await page.waitForTimeout(150);
+await page.mouse.click(m2.x, m2.y);
+await page.waitForTimeout(400);
+const tape = await page.evaluate(() => window.editor.tools.tape.length);
+check('the tape measure takes two ends', tape === 2);
+
+// --- copy and paste
+await page.keyboard.press('v');
+const target = await at(34, 48);
+await page.mouse.click(target.x, target.y);
+await page.waitForTimeout(300);
+await page.keyboard.down('Control');
+await page.keyboard.press('c');
+await page.keyboard.up('Control');
+await page.waitForTimeout(200);
+const beforePaste = (await state()).structures;
+await page.keyboard.down('Control');
+await page.keyboard.press('v');
+await page.keyboard.up('Control');
+await page.waitForTimeout(700);
+const afterPaste = (await state()).structures;
+check('copy and paste adds a copy', afterPaste === beforePaste + 1,
+  `${beforePaste} → ${afterPaste}`);
+
+// --- reordering, which matters because operations apply in sequence
+const order = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const first = doc.data.terrain[0].id;
+  doc.reorder(first, 1);
+  return { first, nowAt: doc.data.terrain.findIndex((op) => op.id === first) };
+});
+check('operations can be reordered', order.nowAt === 1, `moved to index ${order.nowAt}`);
+
+// --- hiding an operation must actually hide it from the simulation
+const muting = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const hedges = doc.data.structures.filter((op) => op.op === 'hedgerow');
+  const before = doc.scene.structures.props.length;
+  doc.edit('hide', () => { for (const h of hedges) h.muted = true; });
+  const after = doc.scene.structures.props.length;
+  doc.edit('show', () => { for (const h of hedges) h.muted = false; });
+  return { before, after, back: doc.scene.structures.props.length };
+});
+check('hiding something takes it out of the world',
+  muting.after < muting.before && muting.back === muting.before,
+  `${muting.before} props → ${muting.after} → ${muting.back}`);
+
+// --- prefabs
+const prefab = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const building = doc.data.structures.find((op) => op.op === 'building');
+  doc.select([building.id]);
+  return window.editor.savePrefab(doc, 'test compound');
+});
+check('a selection can be kept as a piece', prefab === true);
+const stamped = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const piece = window.editor.prefabs().find((p) => p.name === 'test compound');
+  const before = doc.data.structures.length;
+  window.editor.stamp(doc, piece, { x: 20, y: 110 }, Math.PI / 6);
+  return { before, after: doc.data.structures.length };
+});
+check('and stamped down again, turned', stamped.after === stamped.before + 1,
+  `${stamped.before} → ${stamped.after}`);
+
 await page.keyboard.press('v');
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT}/editor.png` });
+
+// --- and finally: does the playtest button hand the game what is on screen?
+// Navigating in the same tab keeps session storage, which is how the level
+// travels. Last, because it leaves the editor behind.
+const marker = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  doc.edit('rename', () => { doc.data.name = 'Playtest Marker'; doc.data.size.width += 20; });
+  sessionStorage.setItem('wargame.playtest', doc.toJSON());
+  return { width: doc.data.size.width, structures: doc.data.structures.length };
+});
+await page.goto('http://localhost:5173/index.html?playtest=1', { waitUntil: 'networkidle' });
+await page.waitForFunction(() => !!window.wargame, { timeout: 30000 }).catch(() => {});
+await page.waitForTimeout(1500);
+const played = await page.evaluate(() => {
+  const snap = window.wargame.snapshot();
+  return { units: snap.units.length, mission: document.querySelector('#mission h1')?.textContent };
+});
+check('playtest runs the level that is on screen',
+  played.mission === 'Playtest Marker',
+  `the game says "${played.mission}", ${played.units} units`);
+await page.screenshot({ path: `${OUT}/editor-playtest.png` });
 
 console.log(checks.join('\n'));
 console.log('console errors:', errors.length ? errors.slice(0, 6) : 'none');

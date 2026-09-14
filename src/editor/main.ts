@@ -7,11 +7,14 @@ import { Fabric } from '../sim/world/geometry.ts';
 import { Surface } from '../sim/world/terrain.ts';
 import { EditorDoc } from './document.ts';
 import { Viewport } from './viewport.ts';
-import { Overlays, type OverlayMode } from './overlays.ts';
+import { Overlays, SightProbe, type OverlayMode } from './overlays.ts';
 import { ToolHost, type Defaults, type ToolId } from './tools.ts';
 import { outlineOf, handlesOf, labelOf, centreOf } from './shapes.ts';
 import { renderInspector } from './inspector.ts';
 import { audit } from './audit.ts';
+import {
+  type Prefab, clipboardSize, copy, deletePrefab, paste, prefabs, savePrefab, stamp,
+} from './clipboard.ts';
 
 const AUTOSAVE = 'wargame.editor.level';
 const PLAYTEST = 'wargame.playtest';
@@ -36,7 +39,8 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const stage = document.getElementById('stage') as HTMLElement;
 const viewport = new Viewport(canvas);
 const overlays = new Overlays();
-viewport.scene.add(overlays.mesh);
+const probe = new SightProbe();
+viewport.scene.add(overlays.mesh, probe.mesh);
 viewport.setScene(doc.scene);
 viewport.frame(doc.data.size.width, doc.data.size.height);
 
@@ -49,12 +53,14 @@ const defaults: Defaults = {
   featureDepth: 1.7,
   brushRadius: 12,
   brushStrength: 0.35,
+  brushMode: 'raise',
   team: 0,
   heavy: false,
   doors: true,
 };
 
 let overlayMode: OverlayMode = 'none';
+let armed: Prefab | null = null;
 let snap = 1;
 let dirty = true;
 
@@ -66,6 +72,22 @@ const tools = new ToolHost({
   snap: () => snap,
   status: (message) => { hint.textContent = message; },
   changed: () => { dirty = true; },
+  stamp: (at, turn) => {
+    if (!armed) return false;
+    const ids = stamp(doc, armed, at, turn);
+    if (ids.length > 0) doc.select(ids);
+    return true;
+  },
+  probe: (at) => {
+    if (!at) {
+      probe.clear();
+    } else {
+      probe.cast(doc.scene, at);
+      hint.textContent =
+        `a man here holds ${probe.reach.toFixed(0)}m of ground on average`;
+    }
+    dirty = true;
+  },
 });
 
 // ------------------------------------------------------------------- panels
@@ -83,7 +105,11 @@ interface ToolButton { id: ToolId; label: string; key: string; }
 const TOOLBOX: { heading: string; items: ToolButton[] }[] = [
   {
     heading: 'Edit',
-    items: [{ id: 'select', label: 'Select', key: 'V' }],
+    items: [
+      { id: 'select', label: 'Select', key: 'V' },
+      { id: 'measure', label: 'Measure', key: 'X' },
+      { id: 'probe', label: 'Sightline', key: 'Q' },
+    ],
   },
   {
     heading: 'Built',
@@ -104,7 +130,8 @@ const TOOLBOX: { heading: string; items: ToolButton[] }[] = [
       { id: 'bank', label: 'Bank', key: 'K' },
       { id: 'mound', label: 'Mound', key: 'M' },
       { id: 'crater', label: 'Crater', key: 'C' },
-      { id: 'paint', label: 'Surface', key: 'P' },
+      { id: 'surface', label: 'Paint', key: 'U' },
+      { id: 'paint', label: 'Patch', key: 'P' },
     ],
   },
   {
@@ -137,6 +164,7 @@ function buildToolbox(): void {
     numberSetting('Depth', 'featureDepth', 0.1),
     numberSetting('Brush', 'brushRadius', 1),
     numberSetting('Force', 'brushStrength', 0.05),
+    choiceSetting('Brush does', 'brushMode', [['raise', 'raise / lower'], ['smooth', 'smooth'], ['flatten', 'flatten']]),
     choiceSetting('Made of', 'fabric', [
       [Fabric.Brick, 'brick'], [Fabric.Concrete, 'concrete'], [Fabric.Timber, 'timber'],
       [Fabric.Sandbag, 'sandbag'], [Fabric.Metal, 'metal'],
@@ -150,6 +178,53 @@ function buildToolbox(): void {
     boolSetting('Belt-fed', 'heavy'),
     boolSetting('Cut doors', 'doors'),
   );
+  buildPalette();
+}
+
+/**
+ * The pieces kept aside for reuse.
+ *
+ * A village is not twenty individually designed buildings, it is one walled
+ * compound and one farmhouse placed several times and turned. Somewhere to keep
+ * those is the difference between an author designing a village and an author
+ * rebuilding the same courtyard from scratch.
+ */
+function buildPalette(): void {
+  const existing = document.getElementById('palette');
+  existing?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'palette';
+  wrap.insertAdjacentHTML('beforeend', '<h4>Pieces</h4>');
+
+  for (const prefab of prefabs()) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span>${escape(prefab.name)}</span>` +
+      `<span class="kind" title="forget it">\u00d7</span>`;
+    row.onclick = (e) => {
+      if ((e.target as HTMLElement).classList.contains('kind')) {
+        deletePrefab(prefab.name);
+        buildPalette();
+        return;
+      }
+      armed = prefab;
+      tools.stampTurn = 0;
+      tools.setTool('stamp');
+      hint.textContent = `${prefab.name} armed \u2014 click to place it, [ and ] to turn it`;
+    };
+    wrap.append(row);
+  }
+
+  const add = document.createElement('button');
+  add.textContent = '+ from selection';
+  add.onclick = () => {
+    const name = prompt('Call this piece what?');
+    if (!name) return;
+    if (savePrefab(doc, name)) buildPalette();
+    else hint.textContent = 'select something first';
+  };
+  wrap.append(add);
+  toolPanel.append(wrap);
 }
 
 function numberSetting(label: string, key: keyof Defaults, step: number): HTMLElement {
@@ -169,7 +244,7 @@ function numberSetting(label: string, key: keyof Defaults, step: number): HTMLEl
 }
 
 function choiceSetting(
-  label: string, key: keyof Defaults, options: [number, string][],
+  label: string, key: keyof Defaults, options: [number | string, string][],
 ): HTMLElement {
   const row = document.createElement('div');
   row.className = 'field';
@@ -182,7 +257,10 @@ function choiceSetting(
     select.append(el);
   }
   select.value = String(defaults[key]);
-  select.onchange = () => { (defaults[key] as number) = Number(select.value); };
+  const numeric = typeof options[0][0] === 'number';
+  select.onchange = () => {
+    (defaults[key] as unknown) = numeric ? Number(select.value) : select.value;
+  };
   row.append(select);
   return row;
 }
@@ -352,6 +430,7 @@ doc.onChange((_, what) => {
   if (what === 'world') {
     viewport.setScene(doc.scene);
     overlays.refresh(doc.scene, doc.data);
+    if (probe.at) probe.cast(doc.scene, probe.at);
     save();
   }
   refreshMarkers();
@@ -493,6 +572,30 @@ addEventListener('keydown', (e) => {
     download();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+    const n = copy(doc);
+    hint.textContent = n > 0 ? `copied ${n}` : 'nothing selected';
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+    e.preventDefault();
+    const ids = paste(doc, { x: viewport.focus.x, y: viewport.focus.z });
+    if (ids.length > 0) doc.select(ids);
+    hint.textContent = ids.length > 0
+      ? `pasted ${ids.length}` : `nothing to paste (${clipboardSize()} in the clipboard)`;
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    doc.select(doc.allOps().map((op) => op.id!).filter(Boolean));
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const one = doc.selection.ops[0];
+    if (one) doc.reorder(one, e.key === 'ArrowUp' ? -1 : 1);
+    return;
+  }
   if (tools.key(e)) {
     e.preventDefault();
     return;
@@ -610,7 +713,11 @@ Object.assign(window as unknown as Record<string, unknown>, {
   editor: {
     doc,
     overlays,
+    probe,
     tools,
+    savePrefab,
+    prefabs,
+    stamp,
     worldToScreen: (p: { x: number; y: number }) =>
       viewport.worldToScreen(p, stage.clientWidth, stage.clientHeight),
   },
