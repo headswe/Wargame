@@ -62,6 +62,34 @@ export class Sim implements SimContext {
   readonly objective: Vec2;
   /** Whoever is commanding the defence, and what it currently believes. */
   defence: Defence;
+  /**
+   * Show the whole field regardless of who can see what.
+   *
+   * For watching rather than playing. Fog of war is there to make the player
+   * commit to a decision without knowing what is behind the wall; a spectator
+   * has no decision to commit to, so all it does is hide the fight he came to
+   * watch — and worse, hides the half of it that is the point, since the
+   * defence's own manoeuvring happens entirely out of the attacker's sight.
+   *
+   * It lives on the simulation rather than being threaded through five
+   * renderers because everything that draws — units, tracers, ordnance, the
+   * objective marker, the fog shader itself — already asks the same two
+   * questions. Answering them differently in one place reveals all of it, and
+   * nothing can be forgotten.
+   */
+  get revealAll(): boolean {
+    return this.omniscient;
+  }
+
+  set revealAll(on: boolean) {
+    if (this.omniscient === on) return;
+    this.omniscient = on;
+    // Immediately, rather than at the next visibility tick: a spectate that
+    // opens on a dark map and clears a moment later looks like a bug.
+    this.recomputeVisibility();
+  }
+
+  private omniscient = false;
   missionState: MissionState = MissionState.InProgress;
 
   readonly fogCols: number;
@@ -445,6 +473,7 @@ export class Sim implements SimContext {
   }
 
   isVisible(x: number, y: number): boolean {
+    if (this.omniscient) return true;
     const i = Math.floor(x / FOG_CELL);
     const j = Math.floor(y / FOG_CELL);
     if (i < 0 || j < 0 || i >= this.fogCols || j >= this.fogRows) return false;
@@ -465,6 +494,13 @@ export class Sim implements SimContext {
    * merely stopping the ray at walls.
    */
   private recomputeVisibility(): void {
+    if (this.omniscient) {
+      // Fill both, so the fog shader fades to clear rather than being bypassed
+      // by every caller and left painting the world dark underneath them.
+      this.visibleTiles.fill(1);
+      this.exploredTiles.fill(1);
+      return;
+    }
     this.visibleTiles.fill(0);
     const { occlusion } = this.scene;
 

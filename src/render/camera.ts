@@ -70,6 +70,22 @@ export class IsoCamera {
     this.focusTarget.z = THREE.MathUtils.clamp(this.focusTarget.z, -4, height + 4);
   }
 
+  /**
+   * Sit back far enough to watch the whole thing.
+   *
+   * A spectator opening on the start line is watching an empty field: the fight
+   * is eighty metres away and the half of it worth seeing — what the defence
+   * does about the attack — is at the other end of the map.
+   */
+  frame(x: number, z: number, span: number): void {
+    this.jumpTo(x, z);
+    // Snapped rather than eased. Easing into position is for a camera the
+    // player moved; this one is being placed before he has seen anything.
+    this.focus.set(x, 0, z);
+    this.zoom = THREE.MathUtils.clamp(span * 0.62, 6, 60);
+    this.zoomTarget = this.zoom;
+  }
+
   jumpTo(x: number, z: number): void {
     this.focusTarget.set(x, 0, z);
   }

@@ -96,6 +96,9 @@ class Mission {
   constructor(level: LevelDef, seed: number, plan: string | null, onRestart: () => void) {
     this.script = plan ? MAPS[level.id]?.plans[plan] ?? null : null;
     this.sim = new Sim(level, seed);
+    // Watching, not commanding: no decision is being taken on incomplete
+    // information, so hiding half the fight only hides the fight.
+    this.sim.revealAll = this.script !== null;
 
     this.fog = new FogOfWar(this.sim);
     this.root.add(buildLighting(this.sim.scene));
@@ -390,6 +393,13 @@ function startMission(pick: Pick): void {
   // panel telling you to right-click when right-clicking does nothing is worse
   // than no panel.
   document.body.classList.toggle('spectating', pick.plan !== null);
+  if (pick.plan) {
+    // Frame the whole contract rather than the start line, and look at it from
+    // the attacker's side so the ground reads the way the plan is about to use
+    // it.
+    const { width, height } = pick.level.size;
+    iso.frame(width / 2, height * 0.52, Math.max(width, height));
+  }
 }
 
 addEventListener('keydown', (event) => {

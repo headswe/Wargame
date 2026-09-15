@@ -96,6 +96,17 @@ watching the run that produced the number.
 The order verbs go dead while watching, and the controls card that lists them
 goes away with them.
 
+Fog of war goes with them too. It is there to make a player commit to a decision
+without knowing what is behind the wall, and a spectator has no decision to
+commit to — so all it does is hide the fight he opened the page to watch, and
+particularly the half of it that is the point, since everything the defence does
+about the attack happens out of the attacker's sight. It is one flag on the
+simulation rather than a special case threaded through five renderers, because
+units, tracers, ordnance, the objective marker and the fog shader all already ask
+the same two questions. The camera needed the same treatment for the same reason:
+opening on the start line meant watching an empty field with the fight eighty
+metres away, so it frames the whole contract instead.
+
 ## The defence is commanded, and can be fooled
 
 Measured over five assaults, a surviving defender used to end the mission a mean
