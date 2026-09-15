@@ -105,6 +105,9 @@ export type StructureOp = OpMeta & (
     thickness?: number;
     openings?: (Opening & { side: number })[];
     partitions?: WallSpec[];
+    /** Level ground inside, and something underfoot. Default on. */
+    floor?: boolean;
+    floorSurface?: Surface;
   }
   | ({ op: 'wall' } & WallSpec)
   | {

@@ -1,6 +1,7 @@
 import { type Vec2, dist, spline, vec } from '../math.ts';
 import { Fabric, STAMP_FLOOR, Solidity } from './geometry.ts';
 import type { Scene } from './scene.ts';
+import { Surface } from './terrain.ts';
 
 /**
  * A village wall: one leaf of brick and a coat of render, not a rampart.
@@ -141,6 +142,10 @@ export interface BuildingSpec {
   openings?: (Opening & { side: number })[];
   /** Interior walls. They belong to the building, and can carry doorways. */
   partitions?: WallSpec[];
+  /** Level ground inside, and something underfoot. Off for a ruin or a pen. */
+  floor?: boolean;
+  /** What the floor is made of. Boards and slab read differently underfoot. */
+  floorSurface?: Surface;
 }
 
 /**
@@ -152,12 +157,47 @@ export interface BuildingSpec {
  * inside it, which is what makes an interior worth fighting through instead of
  * being one room you either hold or do not.
  */
+/**
+ * What is underfoot in a building of each fabric.
+ *
+ * It is a guess at construction rather than a decoration: a brick or concrete
+ * building gets a slab, a timber one gets boards over dirt, and a sandbag or
+ * rubble position never had a floor to begin with. It matters beyond the colour
+ * because surface decides footing, so crossing a room is quicker than crossing
+ * the field outside it.
+ */
+const FLOOR_OF: Partial<Record<Fabric, Surface>> = {
+  [Fabric.Brick]: Surface.Concrete,
+  [Fabric.Concrete]: Surface.Concrete,
+  [Fabric.Metal]: Surface.Concrete,
+  [Fabric.Timber]: Surface.Dirt,
+  [Fabric.Sandbag]: Surface.Dirt,
+  [Fabric.Rubble]: Surface.Rubble,
+};
+
 export function building(scene: Scene, spec: BuildingSpec): number[] {
   const fabric = spec.fabric ?? Fabric.Brick;
   const top = spec.wallTop ?? 2.7;
   const thickness = spec.thickness ?? WALL_THICKNESS;
   const footprint = spec.footprint;
   const ids: number[] = [];
+
+  /**
+   * The floor goes down before the walls, so the walls stand on it.
+   *
+   * Its height is the mean of the ground under the corners rather than the
+   * lowest or the highest of them: a house on a slope is dug into the hill on
+   * one side and stands proud on the other, which is what a house on a slope
+   * actually does. Taking the maximum would perch every building on a plinth
+   * and taking the minimum would bury the uphill wall to its windows.
+   */
+  if (spec.floor !== false) {
+    const level = footprint.reduce((a, p) => a + scene.terrain.heightAt(p.x, p.y), 0)
+      / footprint.length;
+    scene.terrain.pad(footprint, level, {
+      surface: spec.floorSurface ?? FLOOR_OF[fabric] ?? Surface.Dirt,
+    });
+  }
 
   for (let side = 0; side < footprint.length; side++) {
     ids.push(...wall(scene, {

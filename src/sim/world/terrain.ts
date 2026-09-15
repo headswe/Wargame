@@ -337,6 +337,59 @@ export class Terrain {
   }
 
   /** Paint surface without touching height. */
+  /**
+   * Level the ground inside a polygon and put a surface on it: a floor.
+   *
+   * A house standing on rolling ground had the rolling ground running through
+   * it. That is wrong in every way it can be: a man walking across a room was
+   * charged a slope penalty, two men on opposite sides of one room were at
+   * different heights so the sightline between them curved, and the walls stood
+   * at visibly different heights where the ground rose under them.
+   *
+   * The floor is terrain rather than a mesh laid over it. Everything that asks
+   * the ground a question — the navmesh, the occlusion field, a man's eye
+   * height, how fast he crosses a room — asks the same array, so a floor that
+   * were only drawn would be a floor only the player could see.
+   *
+   * The skirt is what stops it reading as a mesa. Ground within a metre or so
+   * outside the wall is eased toward the floor height, which is what a real pad
+   * does to the dirt around it, and it keeps the doorway walkable when the
+   * ground outside falls away.
+   */
+  pad(polygon: Vec2[], height: number, options: { surface?: Surface; skirt?: number } = {}): this {
+    if (polygon.length < 3) return this;
+    const { surface, skirt = 1.4 } = options;
+    const inside = (x: number, y: number): boolean => {
+      let hit = false;
+      for (let a = 0, b = polygon.length - 1; a < polygon.length; b = a++) {
+        const p = polygon[a];
+        const q = polygon[b];
+        if ((p.y > y) !== (q.y > y) && x < ((q.x - p.x) * (y - p.y)) / (q.y - p.y) + p.x) {
+          hit = !hit;
+        }
+      }
+      return hit;
+    };
+
+    this.forEachNear(polygon, skirt + 0.5, (i, j, x, y) => {
+      const idx = this.index(i, j);
+      if (inside(x, y)) {
+        this.heights[idx] = height;
+        if (surface !== undefined) this.surface[idx] = surface;
+        return;
+      }
+      if (skirt <= 0) return;
+      // Outside: blend toward the floor over the skirt, by distance to the
+      // nearest edge rather than to a centre, so a long building's skirt is the
+      // same width everywhere along it.
+      const d = distanceToPolygon(polygon, x, y);
+      if (d > skirt) return;
+      const t = 0.5 + 0.5 * Math.cos((d / skirt) * Math.PI);
+      this.heights[idx] += (height - this.heights[idx]) * t;
+    });
+    return this;
+  }
+
   paint(min: Vec2, max: Vec2, surface: Surface): this {
     const j0 = this.clampRow(Math.floor(min.y / this.spacing));
     const j1 = this.clampRow(Math.ceil(max.y / this.spacing));
@@ -449,4 +502,21 @@ export class Terrain {
 
 function smoothstep(t: number): number {
   return t * t * (3 - 2 * t);
+}
+
+/** Shortest distance from a point to a polygon's edges. */
+function distanceToPolygon(polygon: Vec2[], x: number, y: number): number {
+  let best = Infinity;
+  for (let a = 0, b = polygon.length - 1; a < polygon.length; b = a++) {
+    const p = polygon[b];
+    const q = polygon[a];
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0
+      ? Math.max(0, Math.min(1, ((x - p.x) * dx + (y - p.y) * dy) / len2))
+      : 0;
+    best = Math.min(best, Math.hypot(x - (p.x + dx * t), y - (p.y + dy * t)));
+  }
+  return best;
 }
