@@ -292,7 +292,8 @@ function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
   }
 
   const waypoint = u.path[u.pathIndex];
-  if (dist(u.pos, waypoint) < 0.2) {
+  const before = dist(u.pos, waypoint);
+  if (before < 0.2) {
     u.pathIndex++;
     if (u.pathIndex >= u.path.length) {
       u.path.length = 0;
@@ -315,8 +316,67 @@ function stepMovement(ctx: SimContext, u: Unit, dt: number): void {
   // instead of stopping the operator dead.
   const nx = u.pos.x + vx * dt;
   const ny = u.pos.y + vy * dt;
+  const wasX = u.pos.x;
+  const wasY = u.pos.y;
   if (ctx.scene.walkable(nx, u.pos.y)) u.pos.x = nx;
   if (ctx.scene.walkable(u.pos.x, ny)) u.pos.y = ny;
+
+  /**
+   * Wedged: he wants to move and neither axis would let him.
+   *
+   * The independent-axis trick above only rescues a man approaching a wall at
+   * an angle. The funnel that produces these paths emits axis-aligned legs by
+   * the dozen, and on one of those the perpendicular velocity is exactly zero
+   * — so when the axis he wants is blocked there is nothing to slide with, and
+   * he pushes against the geometry for the rest of the mission. Four of BRAVO
+   * spent the last hundred and ten seconds of a won assault doing exactly that,
+   * which is why the objective never got taken: the fight was over and the men
+   * could not walk the last twenty metres onto it.
+   *
+   * The two grids disagreeing is what puts him there in the first place — the
+   * path is planned on the navmesh and every step is tested against the
+   * walkable field, which rounds thin geometry up by STAMP_FLOOR — so this
+   * cannot be fixed by planning better. It has to be survivable.
+   */
+  if (u.pos.x === wasX && u.pos.y === wasY) {
+    // Try to slide: the two ways along the wall he is pressed against, nearer
+    // end first. A corner he has to round is the common case and this rounds
+    // it without waiting for the fallback below.
+    const slide = speed * dt;
+    const tries: Vec2[] = Math.abs(vx) > Math.abs(vy)
+      ? [vec(wasX, wasY + slide), vec(wasX, wasY - slide)]
+      : [vec(wasX + slide, wasY), vec(wasX - slide, wasY)];
+    tries.sort((a, b) => dist(a, waypoint) - dist(b, waypoint));
+    for (const t of tries) {
+      if (!ctx.scene.walkable(t.x, t.y)) continue;
+      u.pos.x = t.x;
+      u.pos.y = t.y;
+      break;
+    }
+  }
+
+  /**
+   * Stuck is a lack of progress, not a lack of movement.
+   *
+   * Asking "did he move at all" is not enough, because the slide above answers
+   * yes while getting nowhere: pressed square against a wall he steps aside,
+   * drifts back the next tick because the waypoint pulls him there, and jitters
+   * on the spot indefinitely with a healthy velocity and a clean conscience.
+   * Measuring the distance he actually closed catches the jitter and the dead
+   * stop with one rule.
+   */
+  const closed = before - dist(u.pos, waypoint);
+  if (closed > speed * dt * 0.25) u.wedgedFor = 0;
+  else u.wedgedFor += dt;
+  if (u.wedgedFor > 0.6) {
+    // The route is the problem, not the corner. Drop it, and let ensurePath
+    // plan a new one from where he actually is — which is ground the navmesh
+    // agrees he can stand on, whatever it thinks of where he was going.
+    u.path.length = 0;
+    u.pathIndex = 0;
+    u.wedgedFor = 0;
+  }
+
   u.velocity = vec(vx, vy);
   u.groundHeight = ctx.scene.heightAt(u.pos.x, u.pos.y);
 }

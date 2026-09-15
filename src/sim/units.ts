@@ -184,6 +184,14 @@ export interface Unit {
   /** 0..1. Drives accuracy loss, then pinning. */
   suppression: number;
   stamina: number;
+  /**
+   * Seconds spent trying to move and getting nowhere.
+   *
+   * A man wedged against geometry looks exactly like a man standing still, so
+   * nothing upstream can tell the difference. This is what lets the mover
+   * notice and dig itself out.
+   */
+  wedgedFor: number;
   posture: Posture;
   /** 0..1 — how far out of cover they are leaning to shoot. */
   exposure: number;
@@ -292,6 +300,7 @@ export function makeUnit(opts: {
     stabilized: false,
     suppression: 0,
     stamina: 1,
+    wedgedFor: 0,
     posture: Posture.Standing,
     exposure: 1,
     weapon: opts.weapon,
