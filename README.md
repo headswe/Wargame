@@ -107,6 +107,16 @@ one gap that makes a feint worth the men it costs to show.
 pulls the reserve west, the real attack in the east cannot buy it back cheaply,
 and scattered sightings that agree about nothing move nobody.
 
+**It costs them, and that is the honest state of it.** Before the commander,
+59% of the defence's casualties were taken on their feet — men routing. With it,
+79%: repositioning under observation is expensive, and this side cannot yet
+bound or throw its own smoke, so a move is four men standing up at once. Over
+twenty seeds the careful plan went from leaving 2.4 defenders standing to
+leaving 0.5, which widened the skill gradient from 4.5 operators to 7.3 for a
+reason nobody should be pleased about: the attack is not outfighting them, it
+is watching them stand up. Giving the defence bounds and smoke is the next
+piece, and it is the fix — not making the commander move less.
+
 ## Controls
 
 | Input | Effect |

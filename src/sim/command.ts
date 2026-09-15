@@ -38,6 +38,8 @@ export const COMMITMENT = 55;
 const GIVE_GROUND_AT = 0.55;
 /** How far back a failing position falls, towards whatever it is protecting. */
 const FALLBACK_DISTANCE = 22;
+/** Above this much fire on a squad, nobody in it is going anywhere. */
+const PINNED_DOWN = 0.2;
 
 export interface Defence {
   /** Squads held back rather than sited on the perimeter. */
@@ -88,6 +90,38 @@ export interface DefenceOrder {
   why: 'commit' | 'reinforce' | 'give ground';
 }
 
+/**
+ * Whether a squad can be moved at all right now.
+ *
+ * The man-by-man code already knows this rule and says why: standing up and
+ * walking seven metres with a sight picture already on you is how a defender
+ * dies relocating. A commander ordering the same thing to four men at once is
+ * that mistake multiplied, and it is easy to miss — the first version of this
+ * took the skill gradient from 4.5 operators to 7.3, which looked like a
+ * triumph until you noticed the careful plan was killing thirteen and a half
+ * defenders out of fourteen. It was not outfighting them. It was watching them
+ * stand up. Seventy-nine per cent of everyone the defence lost was hit on his
+ * feet, moving.
+ *
+ * Suppression turned out to be the wrong test, because it decays in seconds and
+ * the commander only thinks every fourteen — at almost any given instant most
+ * of a squad reads as un-suppressed even in the middle of a firefight. What
+ * matters is whether anybody is looking at them. Breaking contact first and
+ * moving second is the whole of infantry movement, and until this side can
+ * bound or throw its own smoke it simply has to wait for the lull.
+ */
+function canBeMoved(ctx: SimContext, squad: Squad): boolean {
+  const members = squad.memberIds
+    .map((id) => ctx.units.get(id))
+    .filter((u): u is Unit => !!u && u.state === UnitState.Active);
+  if (members.length === 0) return false;
+
+  const engaged = members.filter(
+    (u) => u.visible.length > 0 || u.suppression > PINNED_DOWN,
+  ).length;
+  return engaged === 0;
+}
+
 export function updateDefence(
   ctx: SimContext, defence: Defence, objective: Vec2, dt: number,
 ): DefenceOrder[] {
@@ -117,6 +151,9 @@ export function updateDefence(
     // Still able to take an order: a squad that has already broken is running
     // anyway, and telling it where to run is not the commander's to do.
     if (squad.morale.state === Nerve.Broken) continue;
+    // And still able to move. A fighting withdrawal is a real thing; four men
+    // standing up together under a base of fire is not one.
+    if (!canBeMoved(ctx, squad)) continue;
 
     const centre = centreOf(members);
     const back = normalize(sub(objective, centre));
@@ -140,6 +177,7 @@ export function updateDefence(
     for (const id of defence.reserve) {
       const squad = ctx.squads[id];
       if (!squad || squad.morale.state === Nerve.Broken) continue;
+      if (!canBeMoved(ctx, squad)) continue;
       const members = squad.memberIds
         .map((m) => ctx.units.get(m))
         .filter((u): u is Unit => !!u && u.state === UnitState.Active);
