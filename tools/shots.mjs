@@ -19,7 +19,7 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404')) errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 
-await page.goto('http://localhost:5173/', { waitUntil: 'networkidle' });
+await page.goto('http://localhost:5173/?level=stepove', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!window.wargame);
 await page.waitForTimeout(600);
 

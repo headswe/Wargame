@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import './ui/style.css';
 
-import { LEVELS, STEPOVE } from './sim/levels.ts';
+import { LEVELS } from './sim/levels.ts';
 import { type LevelDef, defineLevel, migrate } from './sim/world/level-data.ts';
 import { MissionState, Sim } from './sim/sim.ts';
 import { Faction, MoveMode, Posture, UnitState } from './sim/units.ts';
@@ -20,6 +20,8 @@ import { Markers } from './render/markers.ts';
 
 import { Controls } from './input/controls.ts';
 import { Hud } from './ui/hud.ts';
+import { Menu, type Pick } from './ui/menu.ts';
+import { MAPS, type Step } from './sim/plans.ts';
 
 /** The simulation runs on a fixed step regardless of frame rate. */
 const TICK = 1 / 60;
@@ -40,16 +42,14 @@ scene.background = new THREE.Color(0x0d0f0d);
 const iso = new IsoCamera();
 
 /**
- * The level this run is playing.
+ * A level named in the address bar, which skips the picker entirely.
  *
- * Normally the shipped one. When the editor opens a playtest it leaves the
- * level it is working on in session storage first, so what you play is exactly
- * what is on the author's screen rather than the last thing he saved — which is
- * the difference between a playtest button and an export step.
+ * The editor's playtest button leaves the level it is working on in session
+ * storage first, so what runs is exactly what is on the author's screen rather
+ * than the last thing he saved — which is the difference between a playtest
+ * button and an export step. `?level=kolna` is the same door for a shipped map.
  */
-const LEVEL: LevelDef = resolveLevel();
-
-function resolveLevel(): LevelDef {
+function levelFromAddress(): LevelDef | null {
   try {
     const query = new URLSearchParams(location.search);
     if (query.has('playtest')) {
@@ -65,9 +65,9 @@ function resolveLevel(): LevelDef {
       console.warn(`no level called "${wanted}" — have ${LEVELS.map((l) => l.id).join(', ')}`);
     }
   } catch (error) {
-    console.warn('could not load that level, falling back:', error);
+    console.warn('could not load that level, falling back to the picker:', error);
   }
-  return STEPOVE;
+  return null;
 }
 
 class Mission {
@@ -89,8 +89,13 @@ class Mission {
   private readonly lastPinned = new Map<number, boolean>();
   private readonly contacted = new Set<number>();
 
-  constructor(seed: number, onRestart: () => void) {
-    this.sim = new Sim(LEVEL, seed);
+  /** The scripted assault being watched, if this is a spectate. */
+  private readonly script: Step[] | null;
+  private scriptIndex = 0;
+
+  constructor(level: LevelDef, seed: number, plan: string | null, onRestart: () => void) {
+    this.script = plan ? MAPS[level.id]?.plans[plan] ?? null : null;
+    this.sim = new Sim(level, seed);
 
     this.fog = new FogOfWar(this.sim);
     this.root.add(buildLighting(this.sim.scene));
@@ -105,7 +110,7 @@ class Mission {
     );
     scene.add(this.root);
 
-    this.hud = new Hud(uiRoot, LEVEL, this.sim, (id) => this.select([id], false), onRestart);
+    this.hud = new Hud(uiRoot, level, this.sim, (id) => this.select([id], false), onRestart);
 
     this.controls = new Controls(canvas, iso, selectionBox, {
       squadAt: (ground) => {
@@ -204,7 +209,7 @@ class Mission {
    * would quietly turn a positional weapon into a targeted one.
    */
   private throwOrdnance(kind: 'frag' | 'smoke'): void {
-    if (!this.hover || this.selected.size === 0) return;
+    if (this.spectating || !this.hover || this.selected.size === 0) return;
     const ordnance = kind === 'frag' ? Ordnance.Frag : Ordnance.Smoke;
     const label = kind === 'frag' ? 'Frag' : 'Smoke';
 
@@ -225,7 +230,7 @@ class Mission {
 
   /** Hold and rake the ground under the cursor until ordered elsewhere. */
   private suppress(): void {
-    if (!this.hover || this.selected.size === 0) return;
+    if (this.spectating || !this.hover || this.selected.size === 0) return;
     let any = false;
     for (const id of this.selected) {
       if (this.sim.suppressArea(id, this.hover)) any = true;
@@ -237,7 +242,7 @@ class Mission {
   }
 
   private order(dest: Vec2, sprint: boolean, facing: number | null): void {
-    if (this.selected.size === 0) return;
+    if (this.spectating || this.selected.size === 0) return;
     const mode = sprint ? MoveMode.Sprint : MoveMode.Tactical;
     const ids = [...this.selected];
 
@@ -306,6 +311,26 @@ class Mission {
     }
   }
 
+  /**
+   * Issue whatever the scripted assault calls for by now.
+   *
+   * Stepped inside the fixed-timestep loop rather than once a frame, so the
+   * plan fires at the sim times it was written for and what you watch is the
+   * same run the harness scores rather than a near-miss of it.
+   */
+  private runScript(): void {
+    if (!this.script) return;
+    while (this.scriptIndex < this.script.length && this.script[this.scriptIndex].t <= this.sim.time) {
+      const s = this.script[this.scriptIndex++];
+      this.sim.orderSquad(s.squad, { x: s.x, y: s.y }, s.mode, -Math.PI / 2);
+    }
+  }
+
+  /** Watching rather than commanding: the order verbs are not yours. */
+  get spectating(): boolean {
+    return this.script !== null;
+  }
+
   update(dt: number): void {
     this.controls.update(dt);
 
@@ -313,6 +338,7 @@ class Mission {
       let ticks = 0;
       this.accumulator += dt;
       while (this.accumulator >= TICK && ticks < MAX_TICKS_PER_FRAME) {
+        this.runScript();
         this.sim.update(TICK);
         // Effects are cleared at the top of every sim step, so they have to be
         // collected per step, not once per frame. Rounds fired inside the fog
@@ -343,12 +369,45 @@ class Mission {
   private accumulator = 0;
 }
 
-let mission: Mission;
+let mission: Mission | null = null;
 
-function startMission(seed: number): void {
+const spectating = document.createElement('div');
+spectating.id = 'spectating';
+document.body.append(spectating);
+
+const menu = new Menu((pick) => startMission(pick));
+
+function startMission(pick: Pick): void {
   mission?.dispose();
   uiRoot.innerHTML = '';
-  mission = new Mission(seed, () => startMission(Math.floor(Math.random() * 1e6)));
+  // Ending a mission goes back to the picker rather than straight into another
+  // run of the same one. Choosing again is the interesting moment.
+  mission = new Mission(pick.level, pick.seed, pick.plan, () => menu.show());
+  spectating.classList.toggle('show', pick.plan !== null);
+  spectating.textContent = pick.plan
+    ? `spectating \u2014 ${pick.level.name}, the "${pick.plan}" plan` : '';
+  // The controls card lists verbs that are not yours while watching, and a
+  // panel telling you to right-click when right-clicking does nothing is worse
+  // than no panel.
+  document.body.classList.toggle('spectating', pick.plan !== null);
+}
+
+addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  menu.show();
+});
+
+/**
+ * The mission the debug hooks act on.
+ *
+ * Nothing is running until a contract is picked, and a browser check that
+ * silently reads an empty world is worse than one that stops and says why.
+ */
+function running(): Mission {
+  if (!mission) {
+    throw new Error('no mission is running — pick a contract, or open ?level=<id>');
+  }
+  return mission;
 }
 
 function resize(): void {
@@ -360,7 +419,12 @@ function resize(): void {
 
 window.addEventListener('resize', resize);
 resize();
-startMission(1337);
+
+// A level named in the address bar means somebody knows what they want —
+// usually the editor, mid-playtest — so it skips the picker.
+const named = levelFromAddress();
+if (named) startMission({ level: named, plan: null, seed: 1337 });
+else menu.show();
 
 /**
  * Test hook. Automated playtests need to turn a map position into a click, and
@@ -392,15 +456,15 @@ window.wargame = {
     iso.jumpTo(x, y);
   },
   tryThrow(squadId, kind, x, y) {
-    return mission.sim.throwOrdnance(squadId, kind as Ordnance, { x, y });
+    return running().sim.throwOrdnance(squadId, kind as Ordnance, { x, y });
   },
   ordnance() {
-    return mission.sim.live.map((o) => ({
+    return running().sim.live.map((o) => ({
       kind: o.kind, landed: o.landed, fuse: Number(o.fuse.toFixed(2)),
     }));
   },
   snapshot() {
-    const sim = mission.sim;
+    const sim = running().sim;
     return {
       time: Number(sim.time.toFixed(2)),
       missionState: sim.missionState,
@@ -441,6 +505,6 @@ renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  mission.update(dt);
+  mission?.update(dt);
   renderer.render(scene, iso.camera);
 });

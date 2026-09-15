@@ -34,7 +34,7 @@ Three pages, all served by the same dev server:
 
 | | |
 |---|---|
-| `/` | the game |
+| `/` | the game — opens on a contract picker; `?level=<id>` skips it |
 | `/editor.html` | the level editor |
 | `/walls.html` | a look-book of every wall fabric, intact and shot to pieces |
 
@@ -79,6 +79,22 @@ Put those together and fire-and-maneuver falls out: pin them with the belt-fed,
 bound a team up the flank, take the position. `test/tactics.test.ts` asserts the
 gap — a scripted frontal assault through the main gate wins 0/8 seeds, the same
 teams bounding the flanks win 8/8 for a fraction of the casualties.
+
+## You can watch instead of playing
+
+The game opens on a contract picker: two maps, and for each one the choice of
+taking it yourself or watching a scripted assault play out.
+
+The watching is not a demo mode. A whole run of balance figures has accumulated
+in this README describing assaults nobody has ever seen — "the careful plan
+leaves 9.4 of 12 standing" is a number until you sit and watch the plan go
+wrong, at which point it is a design note. Spectating runs **exactly** the
+script `npm run balance` scores, out of the same file, so the two can never
+drift into describing different games. Watch `bounding` on Stepove and you are
+watching the run that produced the number.
+
+The order verbs go dead while watching, and the controls card that lists them
+goes away with them.
 
 ## The defence is commanded, and can be fooled
 
@@ -129,6 +145,7 @@ piece, and it is the fix — not making the commander move less.
 | Q / E | Rotate the camera in 45° steps |
 | WASD, middle-drag, wheel | Pan and zoom |
 | Space | Centre on the selected team |
+| Esc | Back to the contract picker |
 | F | Cover overlay — every protected face you have seen |
 
 ## Reading the board
