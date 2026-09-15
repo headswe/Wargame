@@ -257,6 +257,53 @@ await page.keyboard.press('v');
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT}/editor.png` });
 
+// --- the settings panel follows the tool
+// Measured from what is painted, never from the `hidden` property: `.field`
+// sets a display, an author display beats the browser's rule for [hidden], and
+// the first version of this shipped with every setting still on screen while a
+// probe that asked `el.hidden` cheerfully reported them gone.
+const settingsFor = async (key) => {
+  await page.keyboard.press(key);
+  await page.waitForTimeout(250);
+  return page.evaluate(() => [...document.querySelectorAll('#tools .field')]
+    .filter((r) => r.getClientRects().length > 0)
+    .map((r) => r.querySelector('label')?.textContent));
+};
+
+const onSelect = await settingsFor('v');
+check('the select tool offers no settings, because it has none',
+  onSelect.length === 0, `showed [${onSelect.join(', ')}]`);
+
+const onBuilding = await settingsFor('b');
+check('a building offers exactly what a building has',
+  onBuilding.length === 4 && onBuilding.includes('Made of') && onBuilding.includes('Cut doors'),
+  `[${onBuilding.join(', ')}]`);
+
+// The same stored field, named for the job. A bank that says "Depth" reads as
+// a mistake, and the author has to guess which way the number goes.
+const onDitch = await settingsFor('d');
+const onBank = await settingsFor('k');
+check('one field, named for whatever it is doing',
+  onDitch.includes('Depth') && onBank.includes('Rise'),
+  `ditch [${onDitch.join(', ')}], bank [${onBank.join(', ')}]`);
+
+await page.keyboard.press('v');
+await page.waitForTimeout(200);
+
+// --- the side panels fold, and stay folded
+await page.click('#report h3');
+await page.waitForTimeout(200);
+const foldedNow = await page.evaluate(() => {
+  const body = document.querySelector('#report .ok, #report .problem, #report .stat');
+  return { marked: document.querySelectorAll('#side section.folded').length,
+    bodyPainted: body ? body.getClientRects().length > 0 : false };
+});
+check('a side panel folds away when you click its heading',
+  foldedNow.marked === 1 && !foldedNow.bodyPainted,
+  `${foldedNow.marked} folded, contents painted: ${foldedNow.bodyPainted}`);
+await page.click('#report h3');
+await page.waitForTimeout(200);
+
 // --- the loop that makes the editor part of the game: publish, then play it
 // from the front page. This is the whole point of the feature, so it is checked
 // end to end rather than by trusting that the library round-trips.

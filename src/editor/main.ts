@@ -89,6 +89,8 @@ const defaults: Defaults = {
 };
 
 let overlayMode: OverlayMode = 'none';
+/** The tool whose settings are currently on screen. */
+let shownTool: ToolId | null = null;
 let armed: Prefab | null = null;
 let snap = 1;
 let dirty = true;
@@ -185,30 +187,88 @@ function buildToolbox(): void {
       toolPanel.append(button);
     }
   }
-  toolPanel.insertAdjacentHTML('beforeend', '<h4>Settings</h4>');
-  toolPanel.append(
-    numberSetting('Height', 'wallTop', 0.1),
-    numberSetting('Thick', 'thickness', 0.05),
-    numberSetting('Width', 'featureWidth', 0.5),
-    numberSetting('Depth', 'featureDepth', 0.1),
-    numberSetting('Brush', 'brushRadius', 1),
-    numberSetting('Force', 'brushStrength', 0.05),
-    choiceSetting('Brush does', 'brushMode', [['raise', 'raise / lower'], ['smooth', 'smooth'], ['flatten', 'flatten']]),
-    choiceSetting('Made of', 'fabric', [
+  settingsHeading = document.createElement('h4');
+  settingsHeading.textContent = 'Settings';
+  toolPanel.append(settingsHeading);
+
+  settingRows.clear();
+  for (const [key, row] of Object.entries({
+    wallTop: numberSetting('Height', 'wallTop', 0.1),
+    thickness: numberSetting('Thick', 'thickness', 0.05),
+    featureWidth: numberSetting('Width', 'featureWidth', 0.5),
+    featureDepth: numberSetting('Depth', 'featureDepth', 0.1),
+    brushRadius: numberSetting('Brush', 'brushRadius', 1),
+    brushStrength: numberSetting('Force', 'brushStrength', 0.05),
+    brushMode: choiceSetting('Brush does', 'brushMode',
+      [['raise', 'raise / lower'], ['smooth', 'smooth'], ['flatten', 'flatten']]),
+    fabric: choiceSetting('Made of', 'fabric', [
       [Fabric.Brick, 'brick'], [Fabric.Concrete, 'concrete'], [Fabric.Timber, 'timber'],
       [Fabric.Sandbag, 'sandbag'], [Fabric.Metal, 'metal'],
     ]),
-    choiceSetting('Ground', 'surface', [
+    surface: choiceSetting('Ground', 'surface', [
       [Surface.Grass, 'grass'], [Surface.Crop, 'crop'], [Surface.Dirt, 'dirt'],
       [Surface.Road, 'road'], [Surface.Mud, 'mud'], [Surface.Gravel, 'gravel'],
       [Surface.Concrete, 'concrete'], [Surface.Sand, 'sand'], [Surface.Water, 'water'],
     ]),
-    choiceSetting('Team', 'team', [[0, 'Alpha'], [1, 'Bravo'], [2, 'Charlie']]),
-    choiceSetting('Defender', 'defender',
+    team: choiceSetting('Team', 'team', [[0, 'Alpha'], [1, 'Bravo'], [2, 'Charlie']]),
+    defender: choiceSetting('Defender', 'defender',
       [['rifle', 'rifle'], ['gunner', 'belt-fed'], ['marksman', 'marksman']]),
-    boolSetting('Cut doors', 'doors'),
-  );
+    doors: boolSetting('Cut doors', 'doors'),
+  })) {
+    settingRows.set(key, row);
+    toolPanel.append(row);
+  }
+
   buildPalette();
+  showSettingsFor(tools.tool);
+}
+
+/**
+ * What each tool actually reads, and what to call it while that tool is up.
+ *
+ * Every setting used to be on screen at once — twelve of them, including a
+ * brush force and a wall thickness while the select tool was active, neither of
+ * which could do anything. A panel that shows a control which cannot act is
+ * worse than one that hides it: the reader has to work out for himself which of
+ * the twelve are live, every time, and the answer is usually none of them.
+ *
+ * The labels move with the tool for the same reason. `featureDepth` is how deep
+ * a ditch is cut, how high a bank is raised and how tall a mound stands, and
+ * calling all three "Depth" makes two of them read as mistakes.
+ */
+const TOOL_SETTINGS: Partial<Record<ToolId, [string, string][]>> = {
+  wall: [['fabric', 'Made of'], ['wallTop', 'Height'], ['thickness', 'Thick'],
+    ['doors', 'Cut doors']],
+  building: [['fabric', 'Made of'], ['wallTop', 'Wall height'], ['thickness', 'Thick'],
+    ['doors', 'Cut doors']],
+  revetment: [['fabric', 'Made of']],
+  road: [['featureWidth', 'Width']],
+  cut: [['featureWidth', 'Width'], ['featureDepth', 'Depth']],
+  bank: [['featureWidth', 'Width'], ['featureDepth', 'Rise']],
+  mound: [['featureDepth', 'Height']],
+  sculpt: [['brushMode', 'Brush does'], ['brushRadius', 'Brush'], ['brushStrength', 'Force']],
+  paint: [['surface', 'Ground']],
+  surface: [['surface', 'Ground'], ['brushRadius', 'Brush']],
+  'spawn-team': [['team', 'Team']],
+  'spawn-enemy': [['defender', 'Armed with']],
+};
+
+const settingRows = new Map<string, HTMLElement>();
+let settingsHeading: HTMLElement | null = null;
+
+function showSettingsFor(tool: ToolId): void {
+  const wanted = new Map(TOOL_SETTINGS[tool] ?? []);
+  for (const [key, row] of settingRows) {
+    const label = wanted.get(key);
+    row.hidden = label === undefined;
+    if (label) {
+      const el = row.querySelector('label');
+      if (el) el.textContent = label;
+    }
+  }
+  // Nothing to configure is a thing worth saying by saying nothing: the heading
+  // goes too, rather than sitting over an empty space.
+  if (settingsHeading) settingsHeading.hidden = wanted.size === 0;
 }
 
 /**
@@ -499,6 +559,13 @@ function draw(): void {
     viewport.showHandles(doc.selectedOps.flatMap((op) => handlesOf(op).map((h) => ({ pos: h.pos }))));
     for (const button of toolPanel.querySelectorAll('button[data-tool]')) {
       button.classList.toggle('on', (button as HTMLElement).dataset.tool === tools.tool);
+    }
+    // Only when it actually changes. The tool can be switched by a button, a
+    // keystroke or arming a piece from the palette, and watching the value is
+    // the one place that catches all three.
+    if (tools.tool !== shownTool) {
+      shownTool = tools.tool;
+      showSettingsFor(shownTool);
     }
     readout.innerHTML =
       `<b>${escape(doc.data.name)}</b>  ${doc.data.size.width}×${doc.data.size.height}m\n` +
@@ -862,8 +929,48 @@ function toggleHelp(force?: boolean): void {
   helpPanel.hidden = force === undefined ? !helpPanel.hidden : !force;
 }
 
+/**
+ * The right-hand panels fold.
+ *
+ * Four sections open at once is four sections' worth of scrolling to reach the
+ * one being used, and which one that is changes with what the author is doing:
+ * laying out ground wants Checks and nothing else, wiring up a building wants
+ * Properties. The choice is remembered, because re-folding the same three
+ * panels every time the page reloads is its own small tax.
+ *
+ * Delegated from the container rather than bound per heading, since every panel
+ * rewrites its own contents — and its heading with them — whenever the document
+ * changes.
+ */
+const FOLDED = 'wargame.editor.folded';
+
+document.getElementById('side')!.addEventListener('click', (e) => {
+  const heading = (e.target as HTMLElement).closest('h3');
+  const section = heading?.closest('section');
+  if (!section) return;
+  section.classList.toggle('folded');
+  try {
+    const folded = [...document.querySelectorAll('#side section.folded')].map((s) => s.id);
+    localStorage.setItem(FOLDED, JSON.stringify(folded));
+  } catch {
+    // Storage denied. The fold still works for this sitting, which is the part
+    // that matters; remembering it is a convenience and not worth an exception.
+  }
+});
+
+function restoreFolds(): void {
+  try {
+    const folded = JSON.parse(localStorage.getItem(FOLDED) ?? '[]') as string[];
+    for (const id of folded) document.getElementById(id)?.classList.add('folded');
+  } catch {
+    // Same again: a corrupt note about which panels were shut is not worth
+    // anything, least of all the editor.
+  }
+}
+
 // --------------------------------------------------------------------- go
 
+restoreFolds();
 buildToolbox();
 refreshLoadList();
 refreshMarkers();

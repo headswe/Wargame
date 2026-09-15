@@ -56,8 +56,23 @@ select { padding: 1px 4px; }
   overflow-y: auto; }
 #side section { border-bottom: 1px solid var(--edge); padding: 8px 10px; }
 #side h3 { margin: 0 0 7px; font-size: 9px; letter-spacing: 0.16em; color: var(--dim);
-  text-transform: uppercase; font-weight: 500; }
+  text-transform: uppercase; font-weight: 500; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 6px; }
+#side h3:hover { color: var(--text); }
+/* The twisty, drawn rather than imported so it turns with the section. */
+#side h3::before { content: ''; width: 0; height: 0; flex: none;
+  border-left: 4px solid currentColor; border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent; transform: rotate(90deg);
+  transition: transform 0.12s ease; }
+#side section.folded h3 { margin-bottom: 0; }
+#side section.folded h3::before { transform: rotate(0deg); }
+#side section.folded > :not(h3) { display: none; }
 #side .empty { color: var(--dim); font-style: italic; }
+
+/* Any author rule with a `display` beats the browser's own rule for [hidden],
+   and `.field` below sets one — so hiding a row by setting `hidden` silently
+   did nothing at all. Stated once here rather than remembered at each call. */
+[hidden] { display: none !important; }
 
 .field { display: grid; grid-template-columns: 96px 1fr; gap: 5px; align-items: center;
   margin-bottom: 4px; }
