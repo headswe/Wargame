@@ -10,6 +10,7 @@ import {
   type PlannedSlot, type Squad, type SquadOrder, assignSlots, freshMorale, planSlots, spreadOffset,
 } from './squads.ts';
 import { Nerve } from './morale.ts';
+import { type Defence, freshDefence, updateDefence } from './command.ts';
 import { type Effect, canReach } from './combat.ts';
 import {
   type InFlight, Ordnance, launch, pickThrower, resetOrdnanceIds, spend, stockOf,
@@ -59,6 +60,8 @@ export class Sim implements SimContext {
   time = 0;
 
   readonly objective: Vec2;
+  /** Whoever is commanding the defence, and what it currently believes. */
+  defence: Defence;
   missionState: MissionState = MissionState.InProgress;
 
   readonly fogCols: number;
@@ -79,6 +82,7 @@ export class Sim implements SimContext {
 
     this.spawnPlayerSquads();
     this.spawnHostiles();
+    this.defence = freshDefence(this.squads, this.units, this.objective);
     this.recomputeVisibility();
   }
 
@@ -245,6 +249,34 @@ export class Sim implements SimContext {
   }
 
   /**
+   * Order any squad, either side's. The single place a squad is commanded.
+   *
+   * The player's verb and the defending commander's are the same verb, which is
+   * the point: anything the defence can do to a squad the player can watch
+   * happen to his own, and neither side gets a private mechanism the other
+   * lacks.
+   */
+  private commandSquad(
+    squad: Squad, dest: Vec2, mode: MoveMode, facing: number | null,
+  ): boolean {
+    const order: SquadOrder = { dest: { ...dest }, mode, facing, issuedAt: this.time };
+    const moved = assignSlots(this.scene, squad, this.units, order);
+    if (moved.length === 0) return false;
+
+    squad.order = order;
+    for (const u of moved) {
+      // Being told to go somewhere ends being told to hold and shoot.
+      u.suppressAt = null;
+      u.suppressOrdered = false;
+      u.coverSpot = null;
+      u.moveMode = mode;
+      u.path.length = 0;
+      u.pathIndex = 0;
+    }
+    return true;
+  }
+
+  /**
    * The player's only verb: send a team somewhere, at a tempo, facing a way.
    *
    * The order goes to whoever is still taking orders. Men who have broken are
@@ -257,21 +289,7 @@ export class Sim implements SimContext {
   orderSquad(squadId: number, dest: Vec2, mode: MoveMode, facing: number | null): boolean {
     const squad = this.squads[squadId];
     if (!squad || squad.faction !== Faction.Player) return false;
-
-    const order: SquadOrder = { dest: { ...dest }, mode, facing, issuedAt: this.time };
-    const moved = assignSlots(this.scene, squad, this.units, order);
-    if (moved.length === 0) return false;
-
-    squad.order = order;
-    for (const u of moved) {
-      // Being told to go somewhere ends being told to hold and shoot.
-      u.suppressAt = null;
-      u.suppressOrdered = false;
-      u.moveMode = mode;
-      u.path.length = 0;
-      u.pathIndex = 0;
-    }
-    return true;
+    return this.commandSquad(squad, dest, mode, facing);
   }
 
   /**
@@ -372,6 +390,7 @@ export class Sim implements SimContext {
     // Who went down is settled before anyone's nerve is, so the men beside a
     // casualty feel it on the same tick they have to decide what to do about it.
     updateCasualties(this);
+    this.commandDefence(dt);
     for (const squad of this.squads) updateSquad(this, squad, dt);
     for (const u of this.unitList) updateUnit(this, u, dt);
 
@@ -382,6 +401,21 @@ export class Sim implements SimContext {
     }
 
     this.evaluateMission();
+  }
+
+  /**
+   * The defending side's commander, and the orders it wants given.
+   *
+   * Kept as a separate step that returns orders rather than issuing them, so
+   * the commander can be tested on its own and so every squad in the game is
+   * still commanded through one function.
+   */
+  private commandDefence(dt: number): void {
+    for (const order of updateDefence(this, this.defence, this.objective, dt)) {
+      const squad = this.squads[order.squadId];
+      if (!squad) continue;
+      this.commandSquad(squad, order.dest, MoveMode.Tactical, order.facing);
+    }
   }
 
   private evaluateMission(): void {

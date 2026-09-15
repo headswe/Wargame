@@ -80,6 +80,33 @@ bound a team up the flank, take the position. `test/tactics.test.ts` asserts the
 gap — a scripted frontal assault through the main gate wins 0/8 seeds, the same
 teams bounding the flanks win 8/8 for a fraction of the casualties.
 
+## The defence is commanded, and can be fooled
+
+Measured over five assaults, a surviving defender used to end the mission a mean
+of **two metres** from where he started, and most of that was routing. The only
+reaction on that side was one man shuffling seven metres when he personally got
+too exposed. So the defence was not a defence — it was a set of turrets with
+morale, it played the same way every time, and the only question an attack had
+to answer was which turret to shoot first.
+
+There is a commander now, with the three things a position needs: a reading of
+where the weight of the attack is, a reserve, and the willingness to give ground
+before a squad is destroyed rather than after. The same defenders now end a mean
+of **fifteen metres** from where they started, and 72% of them move at all
+against 28%.
+
+It is deliberately bad at its job. It only thinks every fourteen seconds, it
+needs several sightings that agree before it believes anything, and once it has
+committed the reserve it will not reconsider for the best part of a minute.
+Everything interesting about a defence lives in the gap between what is
+happening and what it believes — so a commander who reads an attack instantly
+and correctly is unbeatable at worst and whack-a-mole at best, and closes the
+one gap that makes a feint worth the men it costs to show.
+
+`test/command.test.ts` asserts the deceivability directly: a feint in the west
+pulls the reserve west, the real attack in the east cannot buy it back cheaply,
+and scattered sightings that agree about nothing move nobody.
+
 ## Controls
 
 | Input | Effect |
