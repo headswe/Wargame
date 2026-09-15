@@ -1,3 +1,4 @@
+import type { EnemySpawn } from './level-data.ts';
 import type { Vec2 } from '../math.ts';
 import { type Navigation, buildNavigation, rebuildNavigation } from '../nav/build.ts';
 import { Solidity, Structures } from './geometry.ts';
@@ -7,7 +8,7 @@ import { Terrain } from './terrain.ts';
 
 export interface Spawns {
   teams: Vec2[][];
-  enemies: { pos: Vec2; heavy: boolean }[];
+  enemies: EnemySpawn[];
   objectives: Vec2[];
 }
 

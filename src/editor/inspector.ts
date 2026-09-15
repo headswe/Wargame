@@ -50,6 +50,13 @@ const SURFACES = [
 
 const NAME: Field = { key: 'name', label: 'name', kind: 'text' };
 
+/** What a defender is issued, in the words the level file uses. */
+const DEFENDERS = [
+  { value: 'rifle', label: 'rifle' },
+  { value: 'gunner', label: 'belt-fed' },
+  { value: 'marksman', label: 'marksman' },
+];
+
 function fieldsFor(op: AnyOp): Field[] {
   switch (op.op) {
     case 'wall':
@@ -132,10 +139,14 @@ export function renderInspector(host: HTMLElement, doc: EditorDoc): void {
     host.insertAdjacentHTML('beforeend', `<div class="stat"><span>${what}</span></div>`);
     if (s.kind === 'enemy') {
       const enemy = doc.data.spawns.enemies[s.index];
-      const row = field({ key: 'heavy', label: 'belt-fed', kind: 'bool' }, enemy, () => {
-        doc.edit('change defender', () => {});
-        doc.refresh();
-      });
+      const row = field(
+        { key: 'kind', label: 'armed with', kind: 'select', options: DEFENDERS },
+        enemy as unknown as Record<string, unknown>,
+        () => {
+          doc.edit('change defender', () => {});
+          doc.refresh();
+        },
+      );
       host.append(row);
     }
     host.insertAdjacentHTML('beforeend',
@@ -191,8 +202,11 @@ function field(f: Field, target: Record<string, unknown>, changed: () => void): 
       select.append(el);
     }
     select.value = String(target[f.key] ?? f.options?.[0].value ?? '');
+    // Fabrics and surfaces are numbers; a defender's kind is a word, because a
+    // level file is read by people and `kind: 'marksman'` says what it is.
+    const numeric = typeof f.options?.[0]?.value === 'number';
     select.onchange = () => {
-      target[f.key] = Number(select.value);
+      target[f.key] = numeric ? Number(select.value) : select.value;
       changed();
     };
     row.append(select);

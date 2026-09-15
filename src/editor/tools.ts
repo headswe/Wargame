@@ -1,6 +1,8 @@
 import type { Vec2 } from '../sim/math.ts';
 import { Fabric } from '../sim/world/geometry.ts';
-import { type Opening, type StructureOp, type TerrainOp, packRuns, unpackRuns } from '../sim/world/level-data.ts';
+import {
+  type DefenderKind, type Opening, type StructureOp, type TerrainOp, packRuns, unpackRuns,
+} from '../sim/world/level-data.ts';
 import { SURFACE_KEEP, Surface } from '../sim/world/terrain.ts';
 import type { AnyOp, EditorDoc } from './document.ts';
 import {
@@ -37,7 +39,7 @@ export interface Defaults {
   brushStrength: number;
   brushMode: 'raise' | 'smooth' | 'flatten';
   team: number;
-  heavy: boolean;
+  defender: DefenderKind;
   doors: boolean;
 }
 
@@ -490,7 +492,7 @@ export class ToolHost {
         while (s.teams.length <= d.team) s.teams.push([]);
         s.teams[d.team].push(p);
       } else if (this.tool === 'spawn-enemy') {
-        s.enemies.push({ pos: p, heavy: d.heavy });
+        s.enemies.push({ pos: p, kind: d.defender });
       } else {
         s.objectives.push(p);
       }

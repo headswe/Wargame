@@ -72,7 +72,7 @@ export const KOLNA_DATA: LevelData = {
   name: 'Kolna Depot',
   brief:
     'The client wants the depot office and the ledgers in it. A walled yard, two ' +
-    'grain sheds, and a dozen men who know the ground better than you do. There is ' +
+    'grain sheds, and two dozen men who know the ground better than you do. There is ' +
     'no open field to cross here — every fight is at twenty metres, around a corner.',
   size: { width: 152, height: 140 },
 
@@ -235,29 +235,50 @@ export const KOLNA_DATA: LevelData = {
     // mean reach is better than Stepove's — so a man here is worth more than a
     // man there, and matching Stepove's headcount made the depot four times
     // the problem the village is.
+    // Twenty-four. Kolna is a depot with a garrison in it, and eleven men in a
+    // walled compound of nine hundred square metres a head meant you shot the
+    // gate party and then toured the place. The office at the end has to be the
+    // last room of a fight rather than the only one with anybody in it.
     enemies: [
       // The forward post: the first thing in the way, and the reason the
       // approach is not a free walk.
-      { pos: vec(69, 80), heavy: true },
-      { pos: vec(76, 79), heavy: false },
-      { pos: vec(117, 76), heavy: false },
+      { pos: vec(69, 80), kind: 'gunner' },
+      { pos: vec(76, 79), kind: 'rifle' },
+      { pos: vec(117, 76), kind: 'rifle' },
+      { pos: vec(100, 80), kind: 'rifle' },
       // The gate, which is where anybody sensible expects you.
       // Set to one side of the gateway rather than behind the wall beside it,
       // so the belt-fed actually looks through the gap it is there to hold.
-      { pos: vec(73, 63), heavy: true },
-      { pos: vec(65, 63), heavy: false },
+      { pos: vec(73, 63), kind: 'gunner' },
+      { pos: vec(65, 63), kind: 'rifle' },
       // Behind loopholes, which is the only reason the wall does not blind them.
-      // Two of them, not six: a loophole covers about twenty-five degrees, so
-      // lining the wall would take the whole garrison to contest one approach.
-      { pos: vec(37, 70), heavy: false },
-      { pos: vec(93, 70), heavy: true },
-      { pos: vec(114, 63), heavy: false },
+      // A loophole covers about twenty-five degrees, so these are placed to
+      // cover approaches rather than to line the wall — there are still nowhere
+      // near enough of them to hold every metre of it, which is the point.
+      { pos: vec(37, 70), kind: 'rifle' },
+      { pos: vec(93, 70), kind: 'gunner' },
+      { pos: vec(114, 63), kind: 'rifle' },
+      { pos: vec(55, 70), kind: 'rifle' },
+      { pos: vec(105, 70), kind: 'rifle' },
       // In the sheds, at the doors rather than in the corners.
-      { pos: vec(40, 58), heavy: false },
-      { pos: vec(60, 46), heavy: false },
-      // The yard itself.
+      { pos: vec(40, 58), kind: 'rifle' },
+      { pos: vec(60, 46), kind: 'rifle' },
+      // The yard itself, which used to be crossable at a walk once the gate
+      // party was dead. Depth here is what stops the compound being a corridor.
+      { pos: vec(49, 45), kind: 'rifle' },
+      { pos: vec(80, 44), kind: 'rifle' },
+      { pos: vec(95, 40), kind: 'rifle' },
+      { pos: vec(34, 34), kind: 'rifle' },
+      // Down the long axis of the yard, which is the only line on this map that
+      // is worth a rifle built for reaching.
+      { pos: vec(30, 22), kind: 'marksman' },
+      { pos: vec(108, 26), kind: 'marksman' },
       // And the office, which is the last room and should feel like it.
-      { pos: vec(66, 22), heavy: false },
+      { pos: vec(56, 29), kind: 'rifle' },
+      { pos: vec(78, 28), kind: 'rifle' },
+      { pos: vec(66, 22), kind: 'rifle' },
+      { pos: vec(73, 20), kind: 'rifle' },
+      { pos: vec(61, 16), kind: 'rifle' },
     ],
   },
 };

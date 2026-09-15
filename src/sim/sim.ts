@@ -2,9 +2,11 @@ import { type Vec2, dist, vec } from './math.ts';
 import { Rng } from './rng.ts';
 import { type LevelDef, createScene } from './levels.ts';
 import type { Scene } from './world/scene.ts';
+import type { DefenderKind, EnemySpawn } from './world/level-data.ts';
 import { Stature } from './world/occlusion.ts';
 import {
-  Faction, MoveMode, UnitState, WEAPONS, type Role, type Unit, makeUnit, resetUnitIds,
+  Faction, MoveMode, UnitState, WEAPONS, type Role, type Unit, type Weapon, makeUnit,
+  resetUnitIds,
 } from './units.ts';
 import {
   type PlannedSlot, type Squad, type SquadOrder, assignSlots, freshMorale, planSlots, spreadOffset,
@@ -30,6 +32,21 @@ const AWARENESS_RADIUS = 7;
 const FOG_CELL = 1;
 
 /** How far a defender will range from his posted spot to find a field of fire. */
+/**
+ * What each kind of defender is issued, and what that makes him punish.
+ *
+ * The gunner punishes crossing open ground: inaccurate, enormous suppression,
+ * belt-fed, so he is what makes a bound a bound rather than a jog. The marksman
+ * punishes standing about at range — accurate, hard-hitting, slow, and nearly
+ * useless once somebody is inside forty metres of him. The rifleman is the
+ * garrison, and is what makes the last thirty metres cost something.
+ */
+const DEFENDER_KIT: Record<DefenderKind, { name: string; role: Role; weapon: Weapon }> = {
+  rifle: { name: 'Guard', role: 'Rifleman', weapon: WEAPONS.ak },
+  gunner: { name: 'Gunner', role: 'Automatic Rifleman', weapon: WEAPONS.pkm },
+  marksman: { name: 'Marksman', role: 'Marksman', weapon: WEAPONS.dmr },
+};
+
 const DIG_IN_RADIUS = 8;
 /** Share of his sector a defender insists on being able to cover. */
 const MIN_FIELD_OF_FIRE = 0.25;
@@ -190,13 +207,14 @@ export class Sim implements SimContext {
       };
       for (const spawn of group) {
         index++;
+        const kit = DEFENDER_KIT[spawn.kind] ?? DEFENDER_KIT.rifle;
         const unit = makeUnit({
-          name: spawn.heavy ? `Gunner ${index}` : `Guard ${index}`,
-          role: spawn.heavy ? 'Automatic Rifleman' : 'Rifleman',
+          name: `${kit.name} ${index}`,
+          role: kit.role,
           faction: Faction.Hostile,
           squadId: squad.id,
           pos: spawn.pos,
-          weapon: spawn.heavy ? WEAPONS.pkm : WEAPONS.ak,
+          weapon: kit.weapon,
           facing: Math.PI / 2,
           maxHp: 85,
         });
@@ -563,11 +581,11 @@ export class Sim implements SimContext {
  * and it keeps a machine gun with the riflemen protecting it.
  */
 function clusterSpawns(
-  spawns: { pos: Vec2; heavy: boolean }[],
+  spawns: EnemySpawn[],
   size = 3,
-): { pos: Vec2; heavy: boolean }[][] {
+): EnemySpawn[][] {
   const left = [...spawns];
-  const groups: { pos: Vec2; heavy: boolean }[][] = [];
+  const groups: EnemySpawn[][] = [];
   while (left.length > 0) {
     const seed = left.shift()!;
     const group = [seed];

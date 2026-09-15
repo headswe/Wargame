@@ -140,7 +140,7 @@ const KILLING_GROUND: LevelDef = {
       a: vec(22, 14), b: vec(40, 14), thickness: 0.8, sill: 0, top: 2.7,
       solidity: Solidity.Solid, fabric: Fabric.Brick, buildingId: null,
     });
-    scene.spawns.enemies = [{ pos: vec(27, 24), heavy: true }, { pos: vec(34, 24), heavy: false }];
+    scene.spawns.enemies = [{ pos: vec(27, 24), kind: 'gunner' }, { pos: vec(34, 24), kind: 'rifle' }];
     scene.spawns.objectives = [vec(30, 18)];
   },
 };

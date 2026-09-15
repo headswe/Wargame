@@ -30,7 +30,24 @@ import type { Surface } from './terrain.ts';
  * to load somebody's level because a field was renamed is how an editor loses
  * a user's afternoon.
  */
-export const LEVEL_FORMAT = 1;
+export const LEVEL_FORMAT = 2;
+
+/**
+ * What a defender is, rather than merely whether he is belt-fed.
+ *
+ * A garrison of two kinds reads as two kinds however many men are in it, and
+ * the distinction that matters to an attacker is not "big gun / small gun" but
+ * what each man punishes: the gunner punishes crossing open ground, the
+ * marksman punishes standing still at range, the rifleman punishes being close.
+ * Three is enough for a position to have a shape you can read and take apart in
+ * an order that makes sense.
+ */
+export type DefenderKind = 'rifle' | 'gunner' | 'marksman';
+
+export interface EnemySpawn {
+  pos: Vec2;
+  kind: DefenderKind;
+}
 
 /** Fields every operation carries, so an editor can track one across edits. */
 export interface OpMeta {
@@ -123,7 +140,7 @@ export interface LevelData {
   structures: StructureOp[];
   spawns: {
     teams: Vec2[][];
-    enemies: { pos: Vec2; heavy: boolean }[];
+    enemies: EnemySpawn[];
     objectives: Vec2[];
   };
 }
@@ -236,7 +253,7 @@ export function applyLevel(scene: Scene, data: LevelData): void {
   }
 
   scene.spawns.teams = data.spawns.teams.map((team) => team.map((p) => ({ ...p })));
-  scene.spawns.enemies = data.spawns.enemies.map((e) => ({ pos: { ...e.pos }, heavy: e.heavy }));
+  scene.spawns.enemies = data.spawns.enemies.map((e) => ({ pos: { ...e.pos }, kind: e.kind }));
   scene.spawns.objectives = data.spawns.objectives.map((p) => ({ ...p }));
 }
 
@@ -270,7 +287,7 @@ export function blankLevel(width = 140, height = 110): LevelData {
       teams: [
         [vecAt(width * 0.4, height - 10), vecAt(width * 0.4 + 1.6, height - 10)],
       ],
-      enemies: [{ pos: vecAt(width * 0.5, height * 0.25), heavy: false }],
+      enemies: [{ pos: vecAt(width * 0.5, height * 0.25), kind: 'rifle' }],
       objectives: [vecAt(width * 0.5, height * 0.18)],
     },
   });
@@ -306,6 +323,16 @@ export function migrate(raw: unknown): LevelData {
   data.spawns.teams ??= [];
   data.spawns.enemies ??= [];
   data.spawns.objectives ??= [];
+
+  // Format 1 said only whether a defender was belt-fed. A level written then —
+  // including one sitting in somebody's browser from last week — still means
+  // exactly what it said, so it is read rather than rejected.
+  for (const e of data.spawns.enemies as (EnemySpawn & { heavy?: boolean })[]) {
+    if (e.kind) continue;
+    e.kind = e.heavy ? 'gunner' : 'rifle';
+    delete e.heavy;
+  }
+
   return assignIds(data);
 }
 

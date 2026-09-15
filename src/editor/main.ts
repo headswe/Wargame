@@ -84,7 +84,7 @@ const defaults: Defaults = {
   brushStrength: 0.35,
   brushMode: 'raise',
   team: 0,
-  heavy: false,
+  defender: 'rifle',
   doors: true,
 };
 
@@ -204,7 +204,8 @@ function buildToolbox(): void {
       [Surface.Concrete, 'concrete'], [Surface.Sand, 'sand'], [Surface.Water, 'water'],
     ]),
     choiceSetting('Team', 'team', [[0, 'Alpha'], [1, 'Bravo'], [2, 'Charlie']]),
-    boolSetting('Belt-fed', 'heavy'),
+    choiceSetting('Defender', 'defender',
+      [['rifle', 'rifle'], ['gunner', 'belt-fed'], ['marksman', 'marksman']]),
     boolSetting('Cut doors', 'doors'),
   );
   buildPalette();
@@ -440,7 +441,11 @@ function refreshMarkers(): void {
     doc.data.spawns.teams.forEach((team, t) => {
       for (const p of team) add(p, TEAM_COLOUR[t % TEAM_COLOUR.length], 1);
     });
-    for (const e of doc.data.spawns.enemies) add(e.pos, 0xff6a4d, e.heavy ? 1.6 : 1);
+    // A gunner reads bigger than a rifleman and a marksman between them, so
+    // the shape of a garrison is legible from the frame view.
+    for (const e of doc.data.spawns.enemies) {
+      add(e.pos, 0xff6a4d, e.kind === 'gunner' ? 1.6 : e.kind === 'marksman' ? 1.3 : 1);
+    }
     for (const o of doc.data.spawns.objectives) {
       const ring = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({
         color: 0xf2c14e, depthTest: false, transparent: true,

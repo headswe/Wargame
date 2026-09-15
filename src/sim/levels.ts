@@ -49,8 +49,8 @@ export const STEPOVE_DATA: LevelData = {
   id: 'stepove',
   name: 'Stepove',
   brief:
-    'Client needs the village school cleared and held before dark. Fourteen or so ' +
-    'irregulars, a belt-fed covering the open ground, and eighty metres of ploughed ' +
+    'Client needs the village school cleared and held before dark. Two dozen ' +
+    'irregulars with belt-feds covering the open ground, and eighty metres of ploughed ' +
     'field between you and the first building. Use the ditch.',
   size: { width: 170, height: 130 },
 
@@ -135,21 +135,49 @@ export const STEPOVE_DATA: LevelData = {
       [vec(128, 122), vec(129.6, 122), vec(131.2, 122), vec(132.8, 122)],
     ],
     objectives: [vec(94, 14)],
+    // Twenty-four, in three layers, because a garrison you can finish off is a
+    // garrison the mission is over without. Fourteen men over 22,000 square
+    // metres was one per forty metres square: a crust you shot through once and
+    // then walked about in an empty village. The win condition already asks you
+    // to break the whole defence before you can stand on the objective, so the
+    // count is what decides whether that is a fight or a formality.
     enemies: [
-      { pos: vec(103, 63), heavy: true },
-      { pos: vec(35, 51), heavy: false },
-      { pos: vec(62, 46), heavy: false },
-      { pos: vec(123, 48), heavy: false },
-      { pos: vec(148, 55), heavy: false },
-      { pos: vec(47, 32), heavy: false },
-      { pos: vec(131, 31), heavy: false },
-      { pos: vec(76, 32), heavy: false },
-      { pos: vec(80, 35), heavy: false },
-      { pos: vec(88, 18), heavy: false },
-      { pos: vec(98, 18), heavy: false },
-      { pos: vec(112, 16), heavy: false },
-      { pos: vec(72, 11), heavy: false },
-      { pos: vec(120, 68), heavy: false },
+      // The screen: what makes the open ground open. Two guns and the men
+      // keeping them company, far enough forward to be fought for separately.
+      { pos: vec(103, 63), kind: 'gunner' },
+      { pos: vec(120, 68), kind: 'gunner' },
+      { pos: vec(88, 66), kind: 'rifle' },
+      { pos: vec(140, 62), kind: 'rifle' },
+      { pos: vec(35, 51), kind: 'rifle' },
+      { pos: vec(148, 55), kind: 'rifle' },
+
+      // The village edge, where the approach stops being a walk. The third gun
+      // covers the middle, which is the one piece of ground every plan must
+      // eventually cross.
+      { pos: vec(95, 45), kind: 'gunner' },
+      { pos: vec(62, 46), kind: 'rifle' },
+      { pos: vec(123, 48), kind: 'rifle' },
+      { pos: vec(110, 42), kind: 'rifle' },
+      { pos: vec(57, 42), kind: 'rifle' },
+      { pos: vec(80, 35), kind: 'rifle' },
+      { pos: vec(76, 32), kind: 'rifle' },
+      { pos: vec(47, 32), kind: 'rifle' },
+      { pos: vec(131, 31), kind: 'rifle' },
+      { pos: vec(63, 30), kind: 'rifle' },
+
+      // Set back among the houses with the length of the street to work with.
+      // A marksman forward is a marksman inside his own minimum useful range.
+      { pos: vec(100, 30), kind: 'marksman' },
+      { pos: vec(60, 20), kind: 'marksman' },
+
+      // The school and what is around it. These are the men you have to break
+      // last, after the approach has already cost you.
+      { pos: vec(88, 18), kind: 'rifle' },
+      { pos: vec(98, 18), kind: 'rifle' },
+      { pos: vec(112, 16), kind: 'rifle' },
+      { pos: vec(72, 11), kind: 'rifle' },
+      { pos: vec(92, 23), kind: 'rifle' },
+      { pos: vec(120, 22), kind: 'rifle' },
     ],
   },
 };

@@ -195,9 +195,9 @@ const OUTPOST: LevelDef = {
     scene.spawns.teams[1] = [vec(20, 66), vec(22, 66), vec(24, 66), vec(26, 66)];
     scene.spawns.teams[2] = [vec(36, 66), vec(38, 66), vec(40, 66), vec(42, 66)];
     scene.spawns.enemies = [
-      { pos: vec(26, 26), heavy: false },
-      { pos: vec(30, 26), heavy: false },
-      { pos: vec(34, 26), heavy: false },
+      { pos: vec(26, 26), kind: 'rifle' },
+      { pos: vec(30, 26), kind: 'rifle' },
+      { pos: vec(34, 26), kind: 'rifle' },
     ];
     scene.spawns.objectives = [vec(30, 20)];
   },

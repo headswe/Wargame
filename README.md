@@ -307,9 +307,11 @@ and nothing about a 3D view of some boxes tells you any of it. Every layer is
 computed with the game's own code, because an overlay that disagrees with the
 simulation is worse than none at all, being believed.
 
-Pointed at Stepove, *what the defence covers* reports 65% of the walkable ground
-covered and **35% seen by nobody**, and draws the uncontested western approach
-in plain blue. The sightline probe says the machine gun position holds 38 metres
+Pointed at Stepove, *what the defence covers* reports 75% of the walkable ground
+covered and **25% seen by nobody**, with a mean of 2.6 rifles bearing on any
+piece of it. Those numbers are the garrison: at fourteen men they read 65% and
+35%, and the uncontested western approach the overlay drew in plain blue is most
+of what has gone. The sightline probe says the machine gun position holds 38 metres
 of ground on average.
 
 ### A level you make is a contract you can take
@@ -409,15 +411,15 @@ point at.
 
 ## Numbers
 
-Measured on Stepove — 170×130 m, 135 wall segments, 253 props, 26 men.
+Measured on Stepove — 170×130 m, 135 wall segments, 253 props, 36 men.
 
 ```
-scene build            ~365 ms at mission start   (was 215 ms before lintels)
-simulation             0.91 ms/tick               (5% of a 60 Hz budget)
+scene build            ~320 ms at mission start
+simulation             0.35 ms/tick under contact (2% of a 60 Hz budget)
 navmesh                ~2850 cells
 sightline              1.50 us over Stepove       (1.39 us before the ceiling test)
 level rebuild (editor) ~145 ms for a structure edit, terrain reused
-overlay sweep          ~115 ms for 5,500 samples against 14 defenders
+overlay sweep          ~86 ms for 5,316 samples against 24 defenders
 ```
 
 The simulation cost has risen with the last few passes — per-soldier nerve, the
