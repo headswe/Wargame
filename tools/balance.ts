@@ -13,7 +13,12 @@
  * badly, which is the thing a tactics game is actually selling.
  *
  *   npm run balance
- *   npm run balance -- bounding      # one plan only
+ *   npm run balance -- kolna             # one map
+ *   npm run balance -- stepove bounding  # one map, one plan
+ *
+ * The map comes first. It did not used to, because there was only one; adding
+ * the second shifted the plan into the next argument and left this comment
+ * describing a command that now exits with "no such map: bounding".
  */
 import { Sim } from '../src/sim/sim.ts';
 import { createScene } from '../src/sim/world/level-data.ts';

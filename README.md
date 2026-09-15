@@ -25,7 +25,7 @@ create the site.
 npm install
 npm run dev           # http://localhost:5173
 npm test              # headless simulation tests
-npm run balance       # measured comparison of three scripted plans
+npm run balance       # measured comparison of the scripted plans (`-- <map> [plan]`)
 npm run playtest      # drives the real game in a browser (needs `npm run dev` up)
 npm run editor-check  # drives the level editor in a browser (ditto)
 ```

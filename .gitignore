@@ -3,7 +3,10 @@ dist/
 .DS_Store
 *.log
 
-# Screenshots the browser tools drop where they are run.
+# Screenshots the browser tools drop where they are run. They default to the
+# repo root, so this list has to keep up with whatever they are told to write.
 0*.png
 editor*.png
 walls*.png
+picker*.png
+own-level*.png
