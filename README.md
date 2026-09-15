@@ -308,8 +308,11 @@ per cent of a frame, so it is recorded rather than worried about.
 - **Interior clearing behaviour** — room entry is currently just movement.
 - **Emplaced crew-served weapons**, which would fix a defence whose belt-fed is
   a single point of failure.
-- **A mission shape that bites** — a clock, reinforcements, extraction. None of
-  the three scripted plans in `npm run balance` finishes inside 200 seconds.
+- **A mission shape that bites** — a clock, reinforcements, extraction. Nothing
+  currently makes time cost anything, so the correct way to play any contract is
+  slowly: there is no pressure a careful plan trades against, and the only limit
+  on patience is the player's. A contract needs a reason to hurry before its
+  tempo decisions mean anything.
 
 Only ever verified on headless software rendering at a few frames a second. It
 has never been looked at on a real GPU.

@@ -15,7 +15,7 @@
  *   npm run balance
  *   npm run balance -- bounding      # one plan only
  */
-import { MissionState, Sim } from '../src/sim/sim.ts';
+import { Sim } from '../src/sim/sim.ts';
 import { KOLNA, STEPOVE } from '../src/sim/levels.ts';
 import { createScene } from '../src/sim/world/level-data.ts';
 import { Faction, MoveMode, Nerve, Posture, UnitState } from '../src/sim/units.ts';
@@ -164,6 +164,22 @@ const MAPS: Record<string, Map> = {
 };
 
 const SEEDS = [1009, 2213, 4242, 7717, 9001];
+
+/**
+ * How long each run is watched for.
+ *
+ * A control, not a rule. The game has no clock and nothing in it cares about
+ * this number; its whole job is to be identical across plans and seeds so that
+ * survivors, ground gained and rounds fired can be compared at all.
+ *
+ * There used to be a "won" column beside the others, counting runs that
+ * finished inside it. That was a mistake worth leaving a note about: it turned
+ * an arbitrary stopping point into a pass mark, read 0/5 for every plan on both
+ * maps — so it separated nothing, which is the one job a column here has — and
+ * invited exactly the conclusion it got, that the missions lacked shape.
+ * Where a plan has got to by a fixed moment is a real comparison. Whether it
+ * had finished by one is not.
+ */
 const DURATION = 200;
 const DT = 0.05;
 
@@ -194,8 +210,6 @@ interface Result {
    */
   operatorsBroke: number;
   defendersBroke: number;
-  /** Whether the plan actually took the place, which survivors do not say. */
-  won: number;
   /**
    * How close the attack actually got to the objective, in metres.
    *
@@ -220,7 +234,7 @@ function play(map: Map, plan: Step[], seed: number): Result {
     operatorsUp: 0, defendersUp: 0, playerRounds: 0, aimedRounds: 0, blindRounds: 0,
     reachSeconds: 0, acquiredSeconds: 0, outOfRangeSeconds: 0, noLineSeconds: 0,
     underFire: 0, pinnedSeconds: 0, defendersWhoFired: 0,
-    operatorsBroke: 0, defendersBroke: 0, won: 0, closest: Infinity, onTheObjective: 0,
+    operatorsBroke: 0, defendersBroke: 0, closest: Infinity, onTheObjective: 0,
   };
   const broke = new Set<number>();
 
@@ -308,7 +322,6 @@ function play(map: Map, plan: Step[], seed: number): Result {
   r.defendersWhoFired = fired.size;
   r.operatorsBroke = players.filter((p) => broke.has(p.id)).length;
   r.defendersBroke = hostiles.filter((h) => broke.has(h.id)).length;
-  r.won = sim.missionState === MissionState.Won ? 1 : 0;
   r.onTheObjective = players.filter(
     (p) => p.state === UnitState.Active && dist(p.pos, sim.objective) < 25,
   ).length;
@@ -379,7 +392,7 @@ console.log(
   `${pad('plan', 9)} ${pad('operators', 10)} ${pad('defenders', 10)} ` +
   `${pad('rounds P/H', 12)} ${pad('blind', 6)} ${pad('reach', 7)} ` +
   `${pad('acq', 6)} ${pad('underfire', 10)} ${pad('shooters', 9)} ${pad('broke P/H', 10)} ` +
-  `${pad('closest', 8)} ${pad('on obj', 7)} won`,
+  `${pad('closest', 8)} ${pad('on obj', 7)}`,
 );
 for (const [name, runs] of totals) {
   const up = mean(runs.map((x) => x.operatorsUp));
@@ -395,7 +408,6 @@ for (const [name, runs] of totals) {
   const blind2 = mean(runs.map((x) => x.noLineSeconds));
   const brokeP = mean(runs.map((x) => x.operatorsBroke));
   const brokeH = mean(runs.map((x) => x.defendersBroke));
-  const won = runs.reduce((a, x) => a + x.won, 0);
   const closest = mean(runs.map((x) => x.closest));
   const onObj = mean(runs.map((x) => x.onTheObjective));
   console.log(
@@ -405,7 +417,6 @@ for (const [name, runs] of totals) {
     `${num(acq, 4, 0)}s  ${num(fire, 6)}s   ${num(shooters, 4)}/${ROSTER.defenders}   ` +
     `${num(brokeP, 4)}/${num(brokeH, 4)}  ${num(closest, 5)}m  ` +
     `${num(onObj, 4)}/${ROSTER.operators}  ` +
-    `${won}/${runs.length}  ` +
     `| no shot: ${num(far, 4, 0)}s too far, ${num(blind2, 4, 0)}s no line`,
   );
 }
