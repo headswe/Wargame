@@ -35,7 +35,7 @@ Three pages, all served by the same dev server:
 | | |
 |---|---|
 | `/` | the game — opens on a contract picker; `?level=<id>` skips it |
-| `/editor.html` | the level editor |
+| `/editor.html` | the level editor, also reachable from the picker; `?level=<id>` opens one |
 | `/walls.html` | a look-book of every wall fabric, intact and shot to pieces |
 
 ## The one design decision everything else follows from
@@ -183,7 +183,8 @@ src/sim/      the whole game, deterministic, zero rendering imports
 src/render/   three.js: level, units, fog, tracers, cover markers
 src/editor/   the level editor
 src/input/    mouse and keyboard
-src/ui/       DOM HUD
+src/ui/       DOM HUD and the contract picker
+src/library   levels you made, kept in browser storage — the editor writes, the picker reads
 test/         headless simulation tests
 tools/        scripted browser checks and the balance harness
 ```
@@ -255,9 +256,10 @@ to exist.
 
 ## The editor
 
-`/editor.html`. It mounts the game's own renderer — an editor that draws its own
-approximation of the world is an editor that lies, and every disagreement
-between the two is a bug found later and blamed on the game.
+A button on the contract picker, and `/editor.html` if you would rather type it.
+It mounts the game's own renderer — an editor that draws its own approximation
+of the world is an editor that lies, and every disagreement between the two is a
+bug found later and blamed on the game.
 
 Two decisions carry most of it. Every operation is reduced to a list of handles
 and an outline, so one drag implementation serves all of them; adding an
@@ -277,6 +279,23 @@ Pointed at Stepove, *what the defence covers* reports 65% of the walkable ground
 covered and **35% seen by nobody**, and draws the uncontested western approach
 in plain blue. The sightline probe says the machine gun position holds 38 metres
 of ground on average.
+
+### A level you make is a contract you can take
+
+**Add to contracts** puts the level on the game's front page, under *Your
+levels*, where it is picked the same way the shipped two are; *Edit* on the card
+brings it back here. Until that loop existed the editor was a tool that happened
+to share a build — reachable only if you knew a URL, producing levels playable
+only if you knew a second one — and the honest description of that is a level
+editor nobody would ever find.
+
+The shelf is `localStorage`, so it is this browser and nowhere else; **Save**
+still writes a level file, which is the thing you can actually keep or send. And
+publishing refuses while the Checks panel shows a `STOP`. Those errors are
+exactly the ones that mean nobody can play it — an unreachable objective, a man
+starting inside a wall, a start line the defence is already shooting at — and a
+contract list that offers those is worse than a short one. Warnings only ask,
+because plenty of them are things an author did on purpose.
 
 | | |
 |---|---|

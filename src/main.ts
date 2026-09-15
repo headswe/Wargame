@@ -21,6 +21,7 @@ import { Markers } from './render/markers.ts';
 import { Controls } from './input/controls.ts';
 import { Hud } from './ui/hud.ts';
 import { Menu, type Pick } from './ui/menu.ts';
+import { savedLevel } from './library.ts';
 import { MAPS, type Step } from './sim/plans.ts';
 
 /** The simulation runs on a fixed step regardless of frame rate. */
@@ -56,12 +57,15 @@ function levelFromAddress(): LevelDef | null {
       const raw = sessionStorage.getItem('wargame.playtest');
       if (raw) return defineLevel(migrate(JSON.parse(raw)));
     }
-    // ?level=kolna. A proper picker belongs with the contracts layer; until
-    // then this is how the second map gets played at all.
+    // ?level=kolna, for a shipped map — and for one of your own, since a level
+    // that can only be reached by clicking through the picker cannot be linked
+    // to, and the editor wants to hand you a link back to what you just made.
     const wanted = query.get('level');
     if (wanted) {
       const found = LEVELS.find((l) => l.id === wanted);
       if (found) return found;
+      const own = savedLevel(wanted);
+      if (own) return defineLevel(own.data);
       console.warn(`no level called "${wanted}" — have ${LEVELS.map((l) => l.id).join(', ')}`);
     }
   } catch (error) {
@@ -385,7 +389,20 @@ function startMission(pick: Pick): void {
   uiRoot.innerHTML = '';
   // Ending a mission goes back to the picker rather than straight into another
   // run of the same one. Choosing again is the interesting moment.
-  mission = new Mission(pick.level, pick.seed, pick.plan, () => menu.show());
+  try {
+    mission = new Mission(pick.level, pick.seed, pick.plan, () => menu.show());
+  } catch (error) {
+    // Now that levels can come from the editor rather than only from this
+    // repository, one that cannot be built is a thing a player can actually
+    // reach — an old save from before a rule tightened, say. A picker that
+    // says which level failed and why is recoverable; a white screen is not.
+    console.error(error);
+    menu.complain(
+      `"${pick.level.name}" would not start: ` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
   spectating.classList.toggle('show', pick.plan !== null);
   spectating.textContent = pick.plan
     ? `spectating \u2014 ${pick.level.name}, the "${pick.plan}" plan` : '';

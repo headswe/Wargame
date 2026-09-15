@@ -22,12 +22,19 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404')) errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 
+// The editor asks before replacing what you have open, and asks for a name when
+// it does not have one. Playwright dismisses dialogs by default, which would
+// silently turn every one of those actions into a no-op and make the checks
+// below pass by not happening.
+let answer = '';
+page.on('dialog', (d) => d.accept(answer));
+
 await page.goto('http://localhost:5173/editor.html', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.editorReady === true, { timeout: 60000 });
 await page.waitForTimeout(900);
 
 // Start from the shipped level every time, whatever is in the autosave.
-await page.click('[data-act="sample"]');
+await page.selectOption('#load', 'stepove');
 await page.waitForTimeout(1200);
 
 const state = () => page.evaluate(() => {
@@ -250,6 +257,40 @@ await page.keyboard.press('v');
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT}/editor.png` });
 
+// --- the loop that makes the editor part of the game: publish, then play it
+// from the front page. This is the whole point of the feature, so it is checked
+// end to end rather than by trusting that the library round-trips.
+answer = 'Range Day';
+await page.evaluate(() => {
+  // Give it a name of its own first: publishing Stepove under Stepove's id is a
+  // different case (the reserved-id guard), and it is tested in test/library.
+  window.editor.doc.edit('rename', () => {
+    window.editor.doc.data.name = 'Range Day';
+    window.editor.doc.data.id = 'range-day';
+  });
+});
+await page.click('[data-act="publish"]');
+await page.waitForTimeout(500);
+const shelved = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem('wargame.levels') ?? '[]').map((l) => l.id));
+check('Add to contracts puts it on the shelf', shelved.includes('range-day'),
+  `shelf holds [${shelved.join(', ')}]`);
+
+// It must refuse a level nobody can play. Breaking the objective is the
+// cheapest error to manufacture and one of the ones that actually ships.
+await page.evaluate(() => {
+  window.editor.doc.edit('break it', () => {
+    window.editor.doc.data.id = 'broken-one';
+    window.editor.doc.data.spawns.objectives = [];
+  });
+});
+await page.click('[data-act="publish"]');
+await page.waitForTimeout(400);
+const afterBroken = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem('wargame.levels') ?? '[]').map((l) => l.id));
+check('and refuses one that will not play', !afterBroken.includes('broken-one'),
+  `shelf holds [${afterBroken.join(', ')}]`);
+
 // --- and finally: does the playtest button hand the game what is on screen?
 // Navigating in the same tab keeps session storage, which is how the level
 // travels. Last, because it leaves the editor behind.
@@ -270,6 +311,51 @@ check('playtest runs the level that is on screen',
   played.mission === 'Playtest Marker',
   `the game says "${played.mission}", ${played.units} units`);
 await page.screenshot({ path: `${OUT}/editor-playtest.png` });
+
+// --- the front page, with no query string: a published level must be pickable
+// there, because a level you can only reach by URL is the thing this replaced.
+await page.goto('http://localhost:5173/index.html', { waitUntil: 'networkidle' });
+await page.waitForSelector('#menu.show', { timeout: 30000 });
+const listed = await page.evaluate(() =>
+  [...document.querySelectorAll('#menu .mine .contract .name')].map((n) => n.textContent));
+check('the picker lists levels you made', listed.includes('Range Day'),
+  `"Your levels" shows [${listed.join(', ')}]`);
+check('and still lists the shipped ones', await page.evaluate(() =>
+  document.querySelectorAll('#menu .contracts .contract').length) === 2);
+check('and offers a way into the editor',
+  await page.evaluate(() => !!document.querySelector('#menu [data-act="new-level"]')));
+await page.screenshot({ path: `${OUT}/picker.png` });
+
+// Edit takes you back to the editor holding that level, not whatever the
+// autosave happens to be — which is the other half of the loop, and the half
+// that quietly fails if ?level= is only wired into the game.
+await page.click('#menu .mine .contract button[title="Open this level in the editor"]');
+await page.waitForFunction(() => window.editorReady === true, { timeout: 60000 });
+await page.waitForTimeout(600);
+const reopened = await page.evaluate(() => ({
+  id: window.editor.doc.data.id, name: window.editor.doc.data.name,
+}));
+check('Edit reopens that level in the editor', reopened.id === 'range-day',
+  `the editor holds "${reopened.name}" (${reopened.id})`);
+
+// Take it. A card that lists but will not start is the bug worth catching.
+await page.goto('http://localhost:5173/index.html', { waitUntil: 'networkidle' });
+await page.waitForSelector('#menu.show', { timeout: 30000 });
+const cards = await page.$$('#menu .mine .contract');
+let started = null;
+for (const card of cards) {
+  if ((await card.$eval('.name', (n) => n.textContent)) !== 'Range Day') continue;
+  await card.$eval('button.go', (b) => b.click());
+  await page.waitForTimeout(2000);
+  started = await page.evaluate(() => ({
+    units: window.wargame?.snapshot().units.length ?? 0,
+    mission: document.querySelector('#mission h1')?.textContent,
+  }));
+}
+check('and taking one of your own starts a contract',
+  started?.mission === 'Range Day' && started.units > 0,
+  started ? `"${started.mission}", ${started.units} units` : 'no card found');
+await page.screenshot({ path: `${OUT}/own-level.png` });
 
 console.log(checks.join('\n'));
 console.log('console errors:', errors.length ? errors.slice(0, 6) : 'none');

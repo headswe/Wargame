@@ -1,8 +1,11 @@
 import * as THREE from 'three';
-import { STEPOVE_DATA } from '../sim/levels.ts';
+import { LEVEL_DATA, STEPOVE_DATA } from '../sim/levels.ts';
 import {
   type LevelData, type Problem, blankLevel, migrate,
 } from '../sim/world/level-data.ts';
+import {
+  RESERVED, idTaken, saveLevel, savedLevel, savedLevels, slugify,
+} from '../library.ts';
 import { Fabric } from '../sim/world/geometry.ts';
 import { Surface } from '../sim/world/terrain.ts';
 import { EditorDoc } from './document.ts';
@@ -23,7 +26,26 @@ const PLAYTEST = 'wargame.playtest';
 
 const doc = new EditorDoc(restore());
 
+/**
+ * What the editor opens on.
+ *
+ * `?level=<id>` wins, because it means somebody asked for something specific —
+ * the picker's Edit button, or a link. Otherwise the autosave, which is "what I
+ * was in the middle of" and is the overwhelmingly common case. Otherwise a
+ * shipped map, because a blank 140x110 field teaches nothing about what the
+ * tools are for.
+ */
 function restore(): LevelData {
+  try {
+    const wanted = new URLSearchParams(location.search).get('level');
+    if (wanted) {
+      const found = named(wanted);
+      if (found) return found;
+      console.warn(`no level called "${wanted}"`);
+    }
+  } catch (error) {
+    console.warn('could not open that level:', error);
+  }
   try {
     const saved = localStorage.getItem(AUTOSAVE);
     if (saved) return migrate(JSON.parse(saved));
@@ -31,6 +53,13 @@ function restore(): LevelData {
     // A corrupt autosave must not cost the author the editor itself.
   }
   return structuredClone(STEPOVE_DATA);
+}
+
+/** A level by id, shipped or shelved. Always a copy — editing must not alias. */
+function named(id: string): LevelData | null {
+  const shipped = LEVEL_DATA.find((l) => l.id === id);
+  if (shipped) return structuredClone(shipped);
+  return savedLevel(id)?.data ?? null;
 }
 
 // ------------------------------------------------------------------- canvas
@@ -641,6 +670,96 @@ fileInput.onchange = async () => {
   fileInput.value = '';
 };
 
+/**
+ * Put this level on the contract list, which is what makes it a level rather
+ * than a drawing.
+ *
+ * It refuses on errors. The audit's errors are the ones that mean nobody can
+ * play it — an unreachable objective, a man starting inside a wall, a start
+ * line the defence is already shooting at — and a contract list that offers
+ * those is worse than one that is short. Warnings only ask, because plenty of
+ * them ("runs outside the level") are things an author does on purpose.
+ */
+function publish(): void {
+  const problems: Problem[] = [...doc.problems, ...audit(doc.scene, doc.data)];
+  const errors = problems.filter((p) => p.severity === 'error');
+  if (errors.length > 0) {
+    alert(
+      `This level will not play yet:\n\n` +
+      errors.slice(0, 6).map((p) => `\u2022 ${p.message}`).join('\n') +
+      (errors.length > 6 ? `\n\u2022 and ${errors.length - 6} more` : '') +
+      `\n\nThe Checks panel lists them all.`,
+    );
+    return;
+  }
+  const warnings = problems.length - errors.length;
+  if (warnings > 0 && !confirm(
+    `${warnings} thing${warnings === 1 ? '' : 's'} worth a look in the Checks panel. Add it anyway?`,
+  )) return;
+
+  // A level needs a name a person picked. "Untitled" is not one, and the id
+  // derived from it would collide with the next untitled level.
+  let { name, id } = doc.data;
+  if (!name.trim() || name === 'Untitled' || !id || id === 'untitled') {
+    const asked = prompt('Name this contract:', name === 'Untitled' ? '' : name);
+    if (asked === null) return;
+    name = asked.trim();
+    if (!name) return;
+    id = slugify(name);
+  }
+  // Shipped ids are spoken for: shadowing one would make ?level=stepove mean
+  // two different things depending on whose machine it is read on.
+  if (RESERVED.has(id)) id = `${id}-${Date.now().toString(36).slice(-4)}`;
+  if (id !== doc.data.id && idTaken(id)
+    && !confirm(`There is already a level called "${id}". Replace it?`)) return;
+
+  if (name !== doc.data.name || id !== doc.data.id) {
+    doc.edit('name the level', () => { doc.data.name = name; doc.data.id = id; });
+  }
+
+  try {
+    saveLevel(structuredClone(doc.data));
+  } catch (error) {
+    alert(error instanceof Error ? error.message : String(error));
+    return;
+  }
+  refreshLoadList();
+  renderLevel();
+  hint.textContent = `"${name}" is on the contract list \u2014 pick it from the game's front page.`;
+}
+
+/**
+ * The shipped maps and your own, in one list.
+ *
+ * A dropdown rather than a button per level, because the shelf grows and the
+ * menubar does not.
+ */
+const loadSelect = document.getElementById('load') as HTMLSelectElement;
+
+function refreshLoadList(): void {
+  const shipped = LEVEL_DATA.map((l) => `<option value="${l.id}">${escape(l.name)}</option>`);
+  const mine = savedLevels().map((l) => `<option value="${l.id}">${escape(l.name)}</option>`);
+  loadSelect.innerHTML =
+    '<option value="">\u2014</option>' +
+    `<optgroup label="Shipped">${shipped.join('')}</optgroup>` +
+    (mine.length > 0 ? `<optgroup label="Yours">${mine.join('')}</optgroup>` : '');
+  loadSelect.value = '';
+}
+
+loadSelect.onchange = () => {
+  const id = loadSelect.value;
+  loadSelect.value = '';
+  if (!id) return;
+  const data = named(id);
+  if (!data) return;
+  if (!confirm(`Open "${data.name}"? The level you have open is autosaved but will be replaced.`)) {
+    return;
+  }
+  doc.load(data);
+  viewport.frame(doc.data.size.width, doc.data.size.height);
+  dirty = true;
+};
+
 document.getElementById('menubar')!.addEventListener('click', (e) => {
   const act = (e.target as HTMLElement).dataset.act;
   if (!act) return;
@@ -656,10 +775,6 @@ document.getElementById('menubar')!.addEventListener('click', (e) => {
       break;
     case 'save':
       download();
-      break;
-    case 'sample':
-      doc.load(structuredClone(STEPOVE_DATA));
-      viewport.frame(doc.data.size.width, doc.data.size.height);
       break;
     case 'undo':
       doc.undo();
@@ -681,6 +796,12 @@ document.getElementById('menubar')!.addEventListener('click', (e) => {
     case 'playtest':
       sessionStorage.setItem(PLAYTEST, doc.toJSON());
       window.open('./index.html?playtest=1', '_blank');
+      break;
+    case 'publish':
+      publish();
+      break;
+    case 'game':
+      location.href = './index.html';
       break;
     default:
       break;
@@ -725,8 +846,11 @@ const helpPanel = document.getElementById('help') as HTMLElement;
 helpPanel.innerHTML =
   '<div class="card"><h2>Level editor</h2><dl>' +
   HELP.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') +
-  '</dl><p>Everything autosaves. Save writes a level file; Open reads one back. ' +
-  'Playtest hands the game exactly what is on screen.</p></div>';
+  '</dl><p>Everything autosaves. Save writes a level file; Open reads one back; ' +
+  'Load opens a shipped map or one of yours. Playtest hands the game exactly ' +
+  'what is on screen, in a new tab. <b>Add to contracts</b> puts it on the ' +
+  'game\u2019s front page for good \u2014 it refuses while the Checks panel ' +
+  'still shows a STOP, because a contract nobody can finish is not one.</p></div>';
 helpPanel.onclick = () => toggleHelp(false);
 
 function toggleHelp(force?: boolean): void {
@@ -736,6 +860,7 @@ function toggleHelp(force?: boolean): void {
 // --------------------------------------------------------------------- go
 
 buildToolbox();
+refreshLoadList();
 refreshMarkers();
 renderInspector(inspector, doc);
 renderLevel();
