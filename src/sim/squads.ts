@@ -27,9 +27,33 @@ export interface Squad {
 export { freshMorale };
 
 /** How far from the order point an operator will range to find real cover. */
-const COVER_SEARCH_RADIUS = 9;
+const COVER_SEARCH_RADIUS = 11;
 /** Operators any closer than this share a grenade. */
-const MIN_SPACING = 2.0;
+const MIN_SPACING = 2.4;
+/** Over this distance, standing near a mate stops counting against a position. */
+const SPREAD = 4.5;
+/** How hard the team pushes apart along whatever cover it is using. */
+const CROWD_WEIGHT = 0.85;
+/** How much a position's field of fire counts against its cover. */
+const FIRE_WEIGHT = 0.8;
+/** Covering this much of the sector is a real fighting position. */
+const GOOD_FIELD_OF_FIRE = 0.35;
+/** And below this it is a hiding place, which the player should be told. */
+const MIN_FIELD_OF_FIRE = 0.12;
+/** Sightlines are not free, so only the best cover gets its view priced. */
+const FIRE_BUDGET = 44;
+/**
+ * How hard a position is pulled back towards the point the player clicked —
+ * split into depth and frontage, because a firing line is wide and shallow.
+ *
+ * A single circular pull cannot tell "further along the wall" from "further
+ * back from it", so the team settles into a blob around the cursor with its
+ * last man in the second rank. Charging four times as much for depth as for
+ * frontage says the thing the player actually meant: spread out along this,
+ * and stay on it.
+ */
+const DEPTH_WEIGHT = 0.85;
+const FRONTAGE_WEIGHT = 0.2;
 /** How far out the imaginary threat is placed when measuring a position. */
 const THREAT_DISTANCE = 70;
 
@@ -86,6 +110,8 @@ export interface PlannedSlot {
   exposure: number;
   /** Whether he could fight from there, or would only be hidden. */
   canFire: boolean;
+  /** 0..1 of the sector he could actually engage from there. */
+  fire: number;
   facing: number;
 }
 
@@ -138,7 +164,15 @@ export function planSlots(
       threatDir,
       slots: members.map((u, i) => {
         const pos = formationSlot(scene, order.dest, threatDir, i);
-        return { unitId: u.id, pos, facing: order.facing ?? facing, ...measure(scene, pos, order.dest, threatPoint) };
+        const measured = measure(scene, pos, order.dest, threatPoint);
+        // A sprint is not a fighting position and is not pretending to be, so
+        // its field of fire is whatever the geometry happens to give.
+        return {
+          unitId: u.id, pos, facing: order.facing ?? facing,
+          exposure: measured.exposure,
+          canFire: measured.canFire,
+          fire: measured.canFire ? 1 : 0,
+        };
       }),
     };
   }
@@ -148,6 +182,27 @@ export function planSlots(
     eye: Stature.crouchedEye,
   });
 
+  // What this team is being asked to cover, which is the question the defence
+  // has always asked of its own positions and the player's orders never did.
+  //
+  // Without it the planner ranks by cover alone, and behind a solid wall every
+  // candidate scores a perfect nothing-shows. The ordering then collapses to
+  // "nearest", the team is posted somewhere it cannot shoot from, and the
+  // player has bought a hiding place while believing he bought a position.
+  const sector = scene.sectorFan(order.dest, facing);
+
+  // Priced lazily down the cover-ranked list: a field of fire costs fifteen
+  // sightlines and this runs under the cursor, so only the ground worth
+  // standing on gets asked what it can see.
+  const graded: { spot: (typeof candidates)[number]; fire: number }[] = [];
+  for (const spot of candidates) {
+    if (graded.length >= FIRE_BUDGET) break;
+    const fire = sector.length === 0
+      ? (spot.canFire ? 1 : 0)
+      : scene.fieldOfFire(spot.pos, sector, Stature.crouchedEye);
+    graded.push({ spot, fire });
+  }
+
   // Whoever carries the belt-fed picks first: the support weapon's position
   // decides where the squad can suppress from, and the rest works around it.
   const ordered = [...members].sort((a, b) => rolePriority(b) - rolePriority(a));
@@ -156,17 +211,49 @@ export function planSlots(
   let formationIndex = 0;
 
   for (const u of ordered) {
-    const pick = candidates.find((c) => !taken.some((t) => dist(t, c.pos) < MIN_SPACING));
-    if (pick) {
-      taken.push(pick.pos);
+    let best: (typeof graded)[number] | null = null;
+    let bestCost = Infinity;
+
+    for (const g of graded) {
+      if (taken.some((t) => dist(t, g.spot.pos) < MIN_SPACING)) continue;
+      // Soft rather than a hard minimum. A hard floor lets four men satisfy it
+      // inside five metres and call that a firing line; a cost that fades out
+      // over seven strings them along whatever they are using.
+      const crowd = taken.reduce(
+        (a, t) => a + Math.max(0, 1 - dist(t, g.spot.pos) / SPREAD), 0,
+      ) * CROWD_WEIGHT;
+      const blind = 1 - Math.min(1, g.fire / GOOD_FIELD_OF_FIRE);
+      const offX = g.spot.pos.x - order.dest.x;
+      const offY = g.spot.pos.y - order.dest.y;
+      const depth = Math.abs(offX * threatDir.x + offY * threatDir.y);
+      const frontage = Math.abs(offX * -threatDir.y + offY * threatDir.x);
+      const stray = (depth * DEPTH_WEIGHT + frontage * FRONTAGE_WEIGHT) / COVER_SEARCH_RADIUS;
+      const cost = g.spot.exposure + blind * FIRE_WEIGHT + crowd + stray;
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = g;
+      }
+    }
+
+    if (best) {
+      taken.push(best.spot.pos);
       slots.push({
-        unitId: u.id, pos: { ...pick.pos }, facing,
-        exposure: pick.exposure, canFire: pick.canFire,
+        unitId: u.id, pos: { ...best.spot.pos }, facing,
+        exposure: best.spot.exposure,
+        fire: best.fire,
+        canFire: best.fire >= MIN_FIELD_OF_FIRE,
       });
     } else {
       const pos = formationSlot(scene, order.dest, threatDir, formationIndex++);
       taken.push(pos);
-      slots.push({ unitId: u.id, pos, facing, ...measure(scene, pos, order.dest, threatPoint) });
+      const measured = measure(scene, pos, order.dest, threatPoint);
+      const fire = sector.length === 0
+        ? (measured.canFire ? 1 : 0)
+        : scene.fieldOfFire(pos, sector, Stature.crouchedEye);
+      slots.push({
+        unitId: u.id, pos, facing,
+        exposure: measured.exposure, fire, canFire: fire >= MIN_FIELD_OF_FIRE,
+      });
     }
   }
   return { threatDir, slots };

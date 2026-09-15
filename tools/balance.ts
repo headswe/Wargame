@@ -163,7 +163,17 @@ const MAPS: Record<string, Map> = {
   },
 };
 
-const SEEDS = [1009, 2213, 4242, 7717, 9001];
+/**
+ * Five is enough to see a big effect and nowhere near enough to see a small
+ * one. `BALANCE_SEEDS=20` when a change looks like it moved something by a man
+ * or two, which is inside the noise at this count.
+ */
+const SEEDS = (() => {
+  const want = Number(process.env.BALANCE_SEEDS ?? 5);
+  const pool = [1009, 2213, 4242, 7717, 9001, 131, 577, 1223, 3299, 6151,
+    77, 401, 929, 1847, 2711, 5003, 8191, 104729, 15485, 32452];
+  return pool.slice(0, Math.max(1, Math.min(pool.length, want)));
+})();
 
 /**
  * How long each run is watched for.

@@ -51,6 +51,16 @@ and the operators fight from there on their own initiative.
 That makes operator autonomy the single most important system in the game. If
 the AI is stupid, no interface saves it.
 
+An order resolves into positions by two questions, not one: how much of a man
+shows from where the trouble is, and how much of the ground he is meant to cover
+he could actually engage. Asking only the first is what made it impossible to
+line a wall — candidates were sampled on rings around the click, so four men
+landed inside four metres of a forty-metre wall, and behind anything solid every
+one of them scored a perfect nothing-shows and the team was posted somewhere it
+could not shoot from. The search walks the cover itself now, and the pull back
+towards the cursor is charged four times more for depth than for frontage,
+because a firing line is wide and shallow.
+
 ## Why flanking works without anything telling it to
 
 Three systems, none of which mentions flanking:
@@ -76,7 +86,7 @@ teams bounding the flanks win 8/8 for a fraction of the casualties.
 |---|---|
 | Right-click | Move tactically — weapon up, hugs cover, reacts instantly |
 | Double right-click | Run — fast, weapon down, ignores cover, loud, gets you seen |
-| Right-click + drag | Set the arc the team faces on arrival |
+| Right-click + drag | Aim. Hold and turn: the destination is fixed where you pressed, and the preview re-plans as you swing, because cover is measured against where the trouble is |
 | Left-click / drag | Select a team / box-select |
 | 1–3, Tab | Pick a team |
 | Q / E | Rotate the camera in 45° steps |
@@ -92,6 +102,10 @@ cannot tell which side of a wall is safe. The answers:
 - **Cover pips** — a bar drawn on the face that protects you. Green for
   full-height, amber for waist-high, dimmed when it faces the wrong way.
   Hover with a team selected to see what an order would buy before you give it.
+- **Planned positions**, hued by how much of a man shows and *drained of colour*
+  when he could not fight from there. A row of grey posts means the wall you are
+  pointing at is somewhere to hide, not somewhere to fight — which is the single
+  most expensive thing about an order to find out afterwards.
 - **X-ray silhouettes** — your own operators show through geometry.
 - **Ghost rings** — last known position of a contact you have lost.
 - **Fog shades the geometry itself**, not just the floor, so you cannot read

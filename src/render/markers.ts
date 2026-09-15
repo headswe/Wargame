@@ -43,6 +43,8 @@ export class Markers {
   private readonly good = new THREE.Color(0x5ad6b0);
   private readonly fair = new THREE.Color(0xd6b45a);
   private readonly bad = new THREE.Color(0xd65a5a);
+  /** Drained: a place to hide rather than a place to fight from. */
+  private readonly blind = new THREE.Color(0x6b7078);
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
   private readonly axis = new THREE.Vector3(0, 1, 0);
@@ -50,10 +52,15 @@ export class Markers {
   private readonly unitScale = new THREE.Vector3(1, 1, 1);
 
   private hover: Vec2 | null = null;
+  /** The order being aimed right now, which outranks the cursor. */
+  private aiming: { at: Vec2; facing: number | null } | null = null;
   private overlay = false;
   private pulse = 0;
   private refreshIn = 0;
   private lastPlannedAt: Vec2 | null = null;
+  private lastPlannedFacing: number | null = null;
+  /** Mean share of the sector the planned positions could engage. */
+  plannedFire = 1;
   private lastSampledAt: Vec2 | null = null;
 
   constructor(sim: Sim) {
@@ -170,6 +177,24 @@ export class Markers {
     return this.overlay;
   }
 
+  /**
+   * The order the player is in the middle of giving.
+   *
+   * While the right button is down the destination is settled and only the
+   * facing is still being chosen, so the preview has to stop following the
+   * cursor: it was showing the plan for wherever the mouse had wandered to
+   * while aiming, which is never the plan about to be bought. Passing the
+   * facing through matters just as much — cover is measured against where the
+   * trouble is, so a team aimed one way and a team aimed another want
+   * different ground, and the player should see that happen as he turns.
+   */
+  setAiming(at: Vec2 | null, facing: number | null): void {
+    this.aiming = at ? { at: { ...at }, facing } : null;
+    // Whatever was planned is now for the wrong question.
+    this.lastPlannedAt = null;
+    this.lastPlannedFacing = null;
+  }
+
   setHover(pos: Vec2 | null): void {
     this.hover = pos;
   }
@@ -214,25 +239,30 @@ export class Markers {
    * frame.
    */
   private updatePlan(sim: Sim, selectedSquads: Set<number>): void {
-    const at = this.hover;
+    const at = this.aiming ? this.aiming.at : this.hover;
+    const facing = this.aiming ? this.aiming.facing : null;
     if (!at || selectedSquads.size === 0) {
       this.posts.count = 0;
       this.chevrons.count = 0;
       this.lastPlannedAt = null;
       return;
     }
-    const moved = !this.lastPlannedAt || dist(this.lastPlannedAt, at) > 0.5;
+    const moved = !this.lastPlannedAt || dist(this.lastPlannedAt, at) > 0.5
+      || facing !== this.lastPlannedFacing;
     if (!moved && this.refreshIn > 0) return;
     this.lastPlannedAt = { ...at };
+    this.lastPlannedFacing = facing;
 
-    const slots = sim.previewOrder(selectedSquads, at, MoveMode.Tactical, null);
+    const slots = sim.previewOrder(selectedSquads, at, MoveMode.Tactical, facing);
+    this.plannedFire = slots.length === 0
+      ? 1 : slots.reduce((a, s) => a + s.fire, 0) / slots.length;
 
     let posts = 0;
     let chevrons = 0;
     for (const slot of slots) {
       if (posts >= MAX_SLOTS) break;
       const ground = sim.scene.heightAt(slot.pos.x, slot.pos.y);
-      this.tint(slot.exposure, slot.canFire);
+      this.tint(slot.exposure, slot.fire);
 
       this.matrix.makeTranslation(slot.pos.x, ground + 0.1, slot.pos.y);
       this.posts.setMatrixAt(posts, this.matrix);
@@ -291,7 +321,7 @@ export class Markers {
         const stance = sim.scene.stance(
           here, sim.scene.threatArc(here, threat), Stature.crouchedTop, Stature.crouchedEye,
         );
-        this.tint(stance.exposure, stance.canFire);
+        this.tint(stance.exposure, stance.canFire ? 1 : 0);
         this.matrix.makeTranslation(x, sim.scene.heightAt(x, y) + 0.06, y);
         this.patches.setMatrixAt(count, this.matrix);
         this.patches.setColorAt(count, this.colour);
@@ -303,10 +333,21 @@ export class Markers {
   }
 
   /** Green where little of you would show, red where all of you would. */
-  private tint(exposure: number, canFire: boolean): void {
+  /**
+   * How a planned position reads at a glance.
+   *
+   * Hue is how much of you shows; a position you cannot fight from is drained
+   * of colour instead, because those are different facts and the player is
+   * making a different decision about each. A row of grey posts means the wall
+   * he is pointing at is somewhere to hide, not somewhere to fight — which
+   * used to be silent, and is the single thing about an order it is most
+   * expensive to learn afterwards.
+   */
+  private tint(exposure: number, fire: number): void {
     if (exposure < 0.4) this.colour.copy(this.good).lerp(this.fair, exposure / 0.4);
     else this.colour.copy(this.fair).lerp(this.bad, (exposure - 0.4) / 0.6);
-    if (!canFire) this.colour.multiplyScalar(0.45);
+    const useful = Math.min(1, fire / 0.3);
+    this.colour.lerp(this.blind, 0.75 * (1 - useful));
   }
 
   private flush(mesh: THREE.InstancedMesh): void {

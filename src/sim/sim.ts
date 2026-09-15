@@ -183,11 +183,26 @@ export class Sim implements SimContext {
    */
   private digIn(u: Unit): void {
     const threat = vec(u.pos.x, Math.min(this.scene.height - 2, u.pos.y + 60));
-    const approach = this.approachFan(u.pos);
+    // The same fan the player's orders are now judged against. It used to be a
+    // private copy in here, which is how the defence came to be better at
+    // picking a firing position than the player commanding the attack was.
+    const approach = this.scene.sectorFan(u.pos, Math.PI / 2, [22, 40, 60]);
     const spots = this.scene.findCover(u.pos, DIG_IN_RADIUS, threat, {
       crouchTop: Stature.crouchedTop,
       eye: Stature.crouchedEye,
       samples: 40,
+      // Rings only, which is the candidate set this defence was balanced
+      // against. Letting it walk the walls too — as the player's orders now do
+      // — sites the same men in half the exposure for the same field of fire,
+      // and measured over twenty seeds that turns the village into a stalemate:
+      // the skill gradient falls from 4.8 operators to 3.0 and fire and
+      // manoeuvre stops beating a frontal charge, which is the one thing this
+      // game is selling.
+      //
+      // That is a better defence worth having and a balance pass in its own
+      // right, with its own seeds and somebody actually playing it. It is not
+      // something to change in passing while fixing how orders are given.
+      alongCover: false,
     });
     if (spots.length === 0) return;
 
@@ -219,27 +234,6 @@ export class Sim implements SimContext {
     u.pos = { ...pick.pos };
     u.coverSpot = { ...pick.pos };
     u.groundHeight = this.scene.heightAt(u.pos.x, u.pos.y);
-  }
-
-  /**
-   * The ground a defender is there to cover: a fan of places an attacker could
-   * actually stand, out along the approach.
-   *
-   * Walkable only, because a position that commands a hillside nobody can climb
-   * commands nothing.
-   */
-  private approachFan(from: Vec2): Vec2[] {
-    const out: Vec2[] = [];
-    for (const range of [22, 40, 60]) {
-      for (const turn of [-0.7, -0.35, 0, 0.35, 0.7]) {
-        const a = Math.PI / 2 + turn;
-        const p = vec(from.x + Math.cos(a) * range, from.y + Math.sin(a) * range);
-        if (p.x < 1 || p.y < 1 || p.x > this.scene.width - 1 || p.y > this.scene.height - 1) continue;
-        if (!this.scene.walkable(p.x, p.y)) continue;
-        out.push(p);
-      }
-    }
-    return out;
   }
 
   get playerSquads(): Squad[] {

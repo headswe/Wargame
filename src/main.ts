@@ -118,9 +118,19 @@ class Mission {
       onHover: (ground) => {
         this.hover = ground;
       },
-      onFacingDrag: (from, angle) =>
-        this.markers.showFacingArrow(from, angle, this.sim.scene.heightAt(from.x, from.y)),
-      onFacingDragEnd: () => this.markers.hideFacingArrow(),
+      onFacingDrag: (from, angle) => {
+        // The destination is settled the moment the button goes down; only the
+        // aim is still being chosen. Freezing the preview there is what lets a
+        // player point at a wall and then turn his men along it while watching
+        // the positions move rather than guessing.
+        this.markers.setAiming(from, angle);
+        if (angle === null) this.markers.hideFacingArrow();
+        else this.markers.showFacingArrow(from, angle, this.sim.scene.heightAt(from.x, from.y));
+      },
+      onFacingDragEnd: () => {
+        this.markers.setAiming(null, null);
+        this.markers.hideFacingArrow();
+      },
       onSelectSquadIndex: (index) => {
         const squad = this.sim.playerSquads[index];
         if (squad) this.select([squad.id], false);
@@ -240,6 +250,18 @@ class Mission {
     if (sprint) {
       const names = ids.map((id) => this.sim.squads[id].name).join(', ');
       this.hud.alert(`${names} moving fast — weapons down`, 'info');
+      return;
+    }
+
+    // Say it out loud when the ground he has picked cannot be fought from.
+    // The posts go grey in the preview, but a player mid-assault is looking at
+    // the firefight, and finding out afterwards that a team spent ninety
+    // seconds hiding behind a wall it could not shoot over is the most
+    // expensive way to learn it.
+    const slots = this.sim.previewOrder(ids, dest, mode, facing);
+    if (slots.length > 0 && slots.every((s) => s.fire < 0.08)) {
+      const names = ids.map((id) => this.sim.squads[id].name).join(', ');
+      this.hud.alert(`${names} can take cover there but cannot fire from it`, 'danger');
     }
   }
 

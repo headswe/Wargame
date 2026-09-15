@@ -11,7 +11,11 @@ export interface ControlCallbacks {
   onSelect(squads: number[], additive: boolean): void;
   onOrder(dest: Vec2, sprint: boolean, facing: number | null): void;
   onHover(ground: Vec2 | null): void;
-  onFacingDrag(from: Vec2, angle: number): void;
+  /**
+   * The right button is down at `from`. `angle` is the direction being dragged
+   * out, or null while the drag is still too short to mean one.
+   */
+  onFacingDrag(from: Vec2, angle: number | null): void;
   onFacingDragEnd(): void;
   onSelectSquadIndex(index: number): void;
   onCycleSquad(): void;
@@ -97,8 +101,9 @@ export class Controls {
     } else if (event.button === 1) {
       this.middleDragging = true;
       event.preventDefault();
-    } else if (event.button === 2) {
+    } else if (event.button === 2 && ground) {
       this.rightDownGround = ground;
+      this.callbacks.onFacingDrag(ground, null);
     }
   };
 
@@ -123,15 +128,17 @@ export class Controls {
       }
     }
 
-    // Dragging out of a right-click aims the team rather than moving it further.
+    // Dragging out of a right-click aims the team rather than moving it
+    // further. Reported from the moment the button goes down, angle or no
+    // angle, so the preview can hold still at the point being ordered instead
+    // of chasing the cursor away from it while the player takes aim.
     if (this.rightDownGround && ground) {
       const dx = ground.x - this.rightDownGround.x;
       const dy = ground.y - this.rightDownGround.y;
-      if (Math.hypot(dx, dy) > FACING_DRAG_MIN) {
-        this.callbacks.onFacingDrag(this.rightDownGround, Math.atan2(dy, dx));
-      } else {
-        this.callbacks.onFacingDragEnd();
-      }
+      const far = Math.hypot(dx, dy) > FACING_DRAG_MIN;
+      this.callbacks.onFacingDrag(
+        this.rightDownGround, far ? Math.atan2(dy, dx) : null,
+      );
     }
   };
 

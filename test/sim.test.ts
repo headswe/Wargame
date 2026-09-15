@@ -5,6 +5,12 @@ import { STEPOVE, createScene } from '../src/sim/levels.ts';
 import { Sim } from '../src/sim/sim.ts';
 import { Faction, MoveMode, UnitState } from '../src/sim/units.ts';
 import { Stature } from '../src/sim/world/occlusion.ts';
+import { Scene } from '../src/sim/world/scene.ts';
+import { wall } from '../src/sim/world/builder.ts';
+import { Fabric, Solidity } from '../src/sim/world/geometry.ts';
+import { type Squad, freshMorale, planSlots } from '../src/sim/squads.ts';
+import { WEAPONS, makeUnit, resetUnitIds } from '../src/sim/units.ts';
+import { vec } from '../src/sim/math.ts';
 
 test('every spawn and the objective sit on ground a body can stand on', () => {
   const scene = createScene(STEPOVE);
@@ -133,5 +139,85 @@ test('the ditch is worth using', () => {
     inDitch.exposure < beside.exposure,
     `crouching in the ditch should show less than crouching beside it: ` +
       `${inDitch.exposure.toFixed(2)} against ${beside.exposure.toFixed(2)}`,
+  );
+});
+
+test('a team ordered onto a wall lines it, and can fight from it', () => {
+  // The complaint this comes from: it was routinely impossible to put men along
+  // a wall. Candidates were sampled on rings around the order point, so four
+  // men landed inside four metres of a forty-metre wall — and every one of them
+  // was judged on cover alone, so the planner was delighted to post a team
+  // somewhere it could not shoot from.
+  const scene = new Scene(80, 80);
+  wall(scene, {
+    a: vec(20, 40), b: vec(60, 40),
+    fabric: Fabric.Sandbag, top: 1.05, thickness: 1.1, solidity: Solidity.LowCover,
+  });
+  scene.bake();
+
+  resetUnitIds();
+  const units = new Map<number, ReturnType<typeof makeUnit>>();
+  const squad: Squad = {
+    id: 0, name: 'ALPHA', faction: Faction.Player, memberIds: [],
+    order: null, threatDir: vec(0, -1), morale: freshMorale(),
+  };
+  for (let i = 0; i < 4; i++) {
+    const u = makeUnit({
+      role: i === 1 ? 'Automatic Rifleman' : 'Rifleman',
+      faction: Faction.Player, squadId: 0, pos: vec(38 + i * 1.6, 60), weapon: WEAPONS.carbine,
+    });
+    units.set(u.id, u);
+    squad.memberIds.push(u.id);
+  }
+
+  const plan = planSlots(scene, squad, units, {
+    dest: vec(40, 42), mode: MoveMode.Tactical, facing: -Math.PI / 2, issuedAt: 0,
+  });
+
+  const xs = plan.slots.map((s) => s.pos.x);
+  const frontage = Math.max(...xs) - Math.min(...xs);
+  assert.ok(frontage > 10, `four men strung over only ${frontage.toFixed(1)}m of a 40m wall`);
+
+  // And on it rather than behind it: a firing line is wide and shallow, so the
+  // spread has to come from frontage and not from men drifting into a second
+  // rank where the cover is just as good and the wall is no use to them.
+  for (const slot of plan.slots) {
+    const depth = slot.pos.y - 40;
+    assert.ok(depth > 0 && depth < 5, `a man sat ${depth.toFixed(1)}m off the wall`);
+    assert.ok(slot.fire > 0.2, `and could only engage ${(slot.fire * 100).toFixed(0)}% of the sector`);
+  }
+});
+
+test('a wall you cannot shoot over says so', () => {
+  // The honest other half. Behind a three-metre wall every candidate scores a
+  // perfect nothing-shows, so ranking by cover alone put the team somewhere it
+  // was safe and useless — and said nothing about it. The positions are still
+  // the best cover going; what changed is that the plan now reports that not
+  // one of them is a fighting position.
+  const scene = new Scene(80, 80);
+  wall(scene, { a: vec(20, 40), b: vec(60, 40), fabric: Fabric.Brick, top: 2.7, thickness: 0.35 });
+  scene.bake();
+
+  resetUnitIds();
+  const units = new Map<number, ReturnType<typeof makeUnit>>();
+  const squad: Squad = {
+    id: 0, name: 'ALPHA', faction: Faction.Player, memberIds: [],
+    order: null, threatDir: vec(0, -1), morale: freshMorale(),
+  };
+  for (let i = 0; i < 4; i++) {
+    const u = makeUnit({
+      role: 'Rifleman', faction: Faction.Player, squadId: 0,
+      pos: vec(38 + i * 1.6, 60), weapon: WEAPONS.carbine,
+    });
+    units.set(u.id, u);
+    squad.memberIds.push(u.id);
+  }
+
+  const plan = planSlots(scene, squad, units, {
+    dest: vec(40, 42), mode: MoveMode.Tactical, facing: -Math.PI / 2, issuedAt: 0,
+  });
+  assert.ok(
+    plan.slots.every((s) => !s.canFire && s.fire === 0),
+    'a solid wall at head height is a place to hide, and the plan has to admit it',
   );
 });

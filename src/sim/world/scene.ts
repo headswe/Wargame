@@ -143,7 +143,18 @@ export class Scene {
     around: Vec2,
     radius: number,
     threat: Vec2,
-    options: { samples?: number; crouchTop?: number; eye?: number } = {},
+    options: {
+      samples?: number;
+      crouchTop?: number;
+      eye?: number;
+      /**
+       * Offer positions strung along nearby walls as well as on rings.
+       *
+       * On by default because it is what makes "line that wall" orderable.
+       * Off for the defence, deliberately — see `digIn`.
+       */
+      alongCover?: boolean;
+    } = {},
   ): CoverSpot[] {
     const samples = options.samples ?? 56;
     const crouchTop = options.crouchTop ?? 1.18;
@@ -169,8 +180,18 @@ export class Scene {
     // candidate sat some distance off, so the order was always a suggestion.
     measure({ ...around });
 
-    // Then rings, which give useful spacing without spending most of the
-    // budget on ground the team is already standing on.
+    // Then along whatever cover is actually here.
+    //
+    // Rings alone cannot express "line this wall". They sample a disc, so four
+    // men ordered onto forty metres of wall land within four metres of each
+    // other, and the one thing the player was asking for — spacing along the
+    // feature — is the one thing the candidate set has no points for. Walking
+    // each nearby run and offering the sheltered side of it is what makes a
+    // firing line orderable at all.
+    if (options.alongCover !== false) this.sampleAlongCover(around, radius, threat, measure);
+
+    // And rings, for ground whose cover is the lie of the land rather than
+    // anything standing on it: a fold, a ditch lip, a reverse slope.
     const rings = 4;
     for (let r = 0; r < rings; r++) {
       const ringRadius = radius * ((r + 1) / rings);
@@ -186,6 +207,61 @@ export class Scene {
 
     results.sort((a, b) => a.score - b.score);
     return results;
+  }
+
+  /**
+   * Candidate positions strung along every piece of cover near a point.
+   *
+   * For each run of wall, fence or sandbags within reach, this walks its length
+   * and offers the side facing away from the trouble, a body's width clear of
+   * it. That is the shape of what a player means when he points at a wall: not
+   * "somewhere near here" but "along that, spread out".
+   *
+   * The spacing is deliberately finer than men will actually stand, so that the
+   * team's own spacing rule has somewhere to put everybody rather than having
+   * to settle for whatever the ring sampler happened to land on.
+   */
+  private sampleAlongCover(
+    around: Vec2, radius: number, threat: Vec2, measure: (pos: Vec2) => void,
+  ): void {
+    const ids = this.structures.segmentsInBox(
+      around.x - radius, around.y - radius, around.x + radius, around.y + radius,
+    );
+    const step = 1.3;
+
+    for (const id of ids) {
+      const segment = this.structures.segments[id];
+      if (!segment || segment.destroyed) continue;
+      // A lintel is not cover; it is a thing you walk under.
+      if (segment.sill > 0) continue;
+
+      const dx = segment.b.x - segment.a.x;
+      const dy = segment.b.y - segment.a.y;
+      const length = Math.hypot(dx, dy);
+      if (length < 1e-6) continue;
+
+      // Perpendicular, turned to point away from wherever the trouble is.
+      let nx = -dy / length;
+      let ny = dx / length;
+      const midX = (segment.a.x + segment.b.x) / 2;
+      const midY = (segment.a.y + segment.b.y) / 2;
+      if ((threat.x - midX) * nx + (threat.y - midY) * ny > 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const standoff = segment.thickness / 2 + 0.75;
+
+      const count = Math.max(1, Math.round(length / step));
+      for (let k = 0; k <= count; k++) {
+        const t = k / count;
+        const pos = {
+          x: segment.a.x + dx * t + nx * standoff,
+          y: segment.a.y + dy * t + ny * standoff,
+        };
+        if (Math.hypot(pos.x - around.x, pos.y - around.y) > radius) continue;
+        measure(pos);
+      }
+    }
   }
 
   /**
@@ -219,6 +295,31 @@ export class Scene {
       ));
     }
     return points;
+  }
+
+  /**
+   * The ground a position is being asked to cover: a fan of places an enemy
+   * could actually stand, out along a bearing.
+   *
+   * Walkable only, because a position that commands a hillside nobody can climb
+   * commands nothing. This used to live in the defender siting code, where it
+   * was hardcoded to face south. It is here because the player's orders need
+   * exactly the same question asked of them, and having two answers to it is
+   * how the defence ended up better at picking a firing position than the
+   * player commanding the attack.
+   */
+  sectorFan(from: Vec2, bearing: number, ranges = [20, 38, 58]): Vec2[] {
+    const out: Vec2[] = [];
+    for (const range of ranges) {
+      for (const turn of [-0.7, -0.35, 0, 0.35, 0.7]) {
+        const a = bearing + turn;
+        const p = { x: from.x + Math.cos(a) * range, y: from.y + Math.sin(a) * range };
+        if (p.x < 1 || p.y < 1 || p.x > this.width - 1 || p.y > this.height - 1) continue;
+        if (!this.walkable(p.x, p.y)) continue;
+        out.push(p);
+      }
+    }
+    return out;
   }
 
   /**
