@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 
 import { LEVEL_DATA } from '../src/sim/levels.ts';
-import { audit } from '../src/editor/audit.ts';
+import { audit } from '../src/sim/world/audit.ts';
 import { sampleGround, sightFan } from '../src/sim/world/analysis.ts';
 import {
   type LevelDef, createScene, defineLevel, migrate, validateLevel,

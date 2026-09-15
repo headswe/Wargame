@@ -76,9 +76,15 @@ Three systems, none of which mentions flanking:
   to everyone.
 
 Put those together and fire-and-maneuver falls out: pin them with the belt-fed,
-bound a team up the flank, take the position. `test/tactics.test.ts` asserts the
-gap — a scripted frontal assault through the main gate wins 0/8 seeds, the same
-teams bounding the flanks win 8/8 for a fraction of the casualties.
+bound a team up the flank, take the position.
+
+Nothing asserts that it works. There used to be a test that did, and deleting it
+was the point: whether one plan beats another on one map is a judgement made by
+playing, and a test that pins it only freezes one map's layout while calling it
+quality. What is checked instead is each of the three parts above, in isolation
+and exactly — cover is worth *this much*, suppression is worth *that much* — in
+`test/combat.test.ts`. If flanking ever stops working, one of those numbers
+moved, and the test that moved says which.
 
 ## You can watch instead of playing
 
@@ -190,9 +196,35 @@ tools/        scripted browser checks and the balance harness
 ```
 
 The split is load-bearing, not tidiness. The simulation runs headless at
-thousands of ticks a second, which is what makes it possible to ask questions
-like "does flanking actually beat a frontal assault across 24 seeds" and get an
-answer in a few seconds. It also means the same seed replays exactly.
+thousands of ticks a second, which is what makes it possible to ask a question
+like "why did the defence never fire" and get an answer in a few seconds rather
+than a play session. It also means the same seed replays exactly.
+
+## Three tiers of testing, and only one of them is a test
+
+**Mechanics get asserted.** `hitChance` decides every engagement and multiplies
+about ten factors together — range, stance, suppression, nerve, exposure,
+motion, concealment. It is a pure function of the scene and two men, so each
+factor can be pinned *exactly* by taking two readings that differ in one field
+and dividing: everything else cancels. Fully suppressed is 0.22 of your
+shooting. Broken nerve is 0.6. Those are checked against the constants, not
+sampled. Then three squad duels on a bench with no AI, no orders and no map,
+where the only thing that differs is a wall or a suppression level.
+
+**Levels get validated, not judged.** `audit` asks whether a level is *broken* —
+unreachable objective, sealed building, a start line already inside the
+defence's envelope. Never whether it is any good. It runs over every level the
+game ships and every level a player builds, and the editor refuses to publish
+into the contract list while it reports an error.
+
+**Gameplay gets measured and reported, never asserted.** `npm run balance` runs
+scripted assaults and prints what happened. It is an instrument, not a
+scoreboard — the useful column turned out to be *how often a defender had a shot
+available at all*, because a defence that never fires may be passive or may
+simply never have had a target, and those want opposite fixes. It has no pass
+and no fail, deliberately: a test asserting that bounding beats a frontal
+assault was deleted, because that is not how you balance a game, and a
+measurement wearing a boolean stops being either.
 
 ## A level is data
 

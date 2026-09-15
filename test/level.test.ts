@@ -12,7 +12,7 @@ import {
   packRuns, unpackRuns, validateLevel,
 } from '../src/sim/world/level-data.ts';
 import { sightFan } from '../src/sim/world/analysis.ts';
-import { audit } from '../src/editor/audit.ts';
+import { audit } from '../src/sim/world/audit.ts';
 import { LEVEL_DATA, STEPOVE_DATA } from '../src/sim/levels.ts';
 import { Faction, MoveMode, WEAPONS, makeUnit, resetUnitIds, speedOf } from '../src/sim/units.ts';
 

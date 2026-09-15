@@ -14,7 +14,7 @@ import { Overlays, SightProbe, type OverlayMode } from './overlays.ts';
 import { ToolHost, type Defaults, type ToolId } from './tools.ts';
 import { outlineOf, handlesOf, labelOf, centreOf } from './shapes.ts';
 import { renderInspector } from './inspector.ts';
-import { audit } from './audit.ts';
+import { audit } from '../sim/world/audit.ts';
 import {
   type Prefab, clipboardSize, copy, deletePrefab, paste, prefabs, savePrefab, stamp,
 } from './clipboard.ts';

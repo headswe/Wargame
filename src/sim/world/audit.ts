@@ -1,8 +1,8 @@
-import { type Vec2, dist, vec } from '../sim/math.ts';
-import type { Problem } from '../sim/world/level-data.ts';
-import { Stature } from '../sim/world/occlusion.ts';
-import type { Scene as SimScene } from '../sim/world/scene.ts';
-import type { LevelData } from '../sim/world/level-data.ts';
+import { type Vec2, dist, vec } from '../math.ts';
+import type { Problem } from './level-data.ts';
+import { Stature } from './occlusion.ts';
+import type { Scene as SimScene } from './scene.ts';
+import type { LevelData } from './level-data.ts';
 
 /**
  * The checks that need the level built rather than just read.
@@ -12,6 +12,17 @@ import type { LevelData } from '../sim/world/level-data.ts';
  * a house whose door a wall was laid across, or a defender standing inside a
  * wall. Those are the mistakes that actually ship, because the level looks
  * perfectly correct in the viewport right up until nobody can get anywhere.
+ *
+ * This is the level tier of testing, and it is deliberately not the same thing
+ * as a test. It asks whether a level is *broken* — unreachable, sealed, in
+ * contact on the start line — never whether it is any good. Whether the ground
+ * is interesting is a judgement made by playing it, and a check that pretended
+ * otherwise would only pin one map's layout in place while calling it quality.
+ *
+ * It lives here rather than in the editor because three callers need it and
+ * only one of them is an editor: the editor shows it, `npm run level-report`
+ * prints it, and the test suite runs it over every shipped level. It imports
+ * nothing but the simulation, which is what makes that possible.
  */
 export function audit(scene: SimScene, data: LevelData): Problem[] {
   const problems: Problem[] = [];
@@ -82,6 +93,26 @@ export function audit(scene: SimScene, data: LevelData): Problem[] {
       say('warning', 'spawns', `defender ${i + 1} is standing inside something solid`);
     }
   });
+
+  /**
+   * The defence has to be able to get to the thing it is defending.
+   *
+   * A defender walled off from the objective cannot fall back onto it, cannot
+   * be pulled across as a reserve, and will stand where he was put until
+   * somebody shoots him — which reads as a bug in the commander rather than in
+   * the level that caused it.
+   */
+  const firstObjective = data.spawns.objectives[0];
+  if (firstObjective && scene.walkable(firstObjective.x, firstObjective.y)) {
+    const stranded = data.spawns.enemies.filter((e) => {
+      const from = nearestWalkable(e.pos);
+      return from ? !scene.findPath(from, firstObjective) : false;
+    }).length;
+    if (stranded > 0) {
+      say('error', 'spawns',
+        `${stranded} defender${stranded === 1 ? ' is' : 's are'} walled off from the objective`);
+    }
+  }
 
   data.spawns.objectives.forEach((o, i) => {
     if (!scene.walkable(o.x, o.y)) {

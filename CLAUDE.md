@@ -31,8 +31,8 @@ working tree.
 `src/sim/` imports nothing from `three` and nothing from `src/render/`. Check
 before adding an import there. This is not tidiness — it is what lets the whole
 tactical layer run headless at thousands of ticks a second, which is what makes
-`npm run balance` able to answer "does flanking actually beat a frontal assault
-across 20 seeds" in a few seconds. Breaking it silently costs the only
+it possible to ask "why did the defence never fire" and get an answer in
+seconds rather than a play session. Breaking it silently costs the only
 instrument this project has.
 
 Everything random draws from `Rng` (mulberry32, `src/sim/rng.ts`) so a mission
@@ -56,7 +56,7 @@ rather than reaching for `enum` and discovering at test time why nobody did.
 
 ```
 src/sim/      the game, deterministic, headless
-src/sim/world/  terrain, occlusion, navmesh, level format
+src/sim/world/  terrain, occlusion, navmesh, level format, level audit
 src/render/   three.js views — read the sim, never write to it
 src/editor/   the level editor
 src/input/    mouse and keyboard
@@ -95,12 +95,45 @@ adds a ceiling term — the same equation upside down. See
 overlay that disagrees with the simulation is worse than none, because it is
 believed.
 
+## Three tiers, and only one of them is a test
+
+Do not collapse these. Most of the bad testing in this repository's history came
+from putting a question in the wrong tier.
+
+**1. Mechanics — assert, exactly.** `test/combat.test.ts`. `hitChance` is a pure
+function of the scene and two men, so a factor is isolated by taking two
+readings differing in one field and dividing; everything else cancels and the
+ratio *is* the constant in the source. Suppression is 0.22, nerve floors at
+0.6, sprinting is 0.72. These are exact, not sampled, and they run in
+milliseconds. New mechanics belong here.
+
+**2. Levels — validate, never judge.** `src/sim/world/audit.ts` asks whether a
+level is *broken*: unreachable objective, sealed building, a start line inside
+the defence's envelope. It never asks whether the ground is any good. It runs
+over shipped and player-built levels alike; `test/level.test.ts` holds the
+shipped ones to zero problems and the editor refuses to publish on an error.
+Add level rules here, not as a test hardcoded against one map.
+
+**3. Gameplay — measure and report, never assert.** `npm run balance`. It is an
+instrument, not a scoreboard. It has no pass and no fail on purpose.
+
+**Do not write a test asserting that one plan beats another.** There was one
+(`test/tactics.test.ts`, deleted). It was 87% of the suite's runtime for a
+single assertion; it ran on private copies of the scripted plans that had
+already drifted ten metres from the real ones; it sampled four seeds for an
+effect smaller than its own noise; and when a shared helper accidentally buffed
+the defence, it went red claiming "fire and maneuver no longer beats crossing
+the open" when the actual fact was "defender siting improved by 0.1 exposure".
+A test whose failure names the wrong subsystem is worse than no test. That
+question belongs in tier 3, where it is a number you read.
+
 ## Measure before you argue
 
-`npm run balance` runs scripted assaults across seeds and reports survivors,
-rounds fired and — the number that mattered most — how often a defender had a
-shot available at all. Treat the absolute numbers as a fixture; what they are
-good for is *comparison*, the same plans before and after a change.
+`npm run balance` reports survivors, rounds fired and — the number that mattered
+most — how often a defender had a shot available at all, because a defence that
+never fires may be passive or may simply never have had a target, and those want
+opposite fixes. Treat the absolute numbers as a fixture; what they are good for
+is *comparison*, the same plans before and after a change.
 
 Habits this repo has paid for:
 
@@ -117,6 +150,15 @@ Habits this repo has paid for:
 - **Do not turn a stopping condition into a metric.** The 200s cutoff in the
   harness is a control so runs are comparable; it is not a win condition, and
   the game has no clock.
+- **Measure the noise floor before believing a gap.** Writing the duel bench in
+  `test/combat.test.ts`, eight seeds showed one side 0.9 men ahead on identical
+  ground. More seeds appeared to fix it and then it came back — the tell that
+  the bias was in the bench, not the sample. It was: a hit adds suppression to
+  the man it lands on, so whichever side resolved first degraded the other's
+  shooting before being degraded back, worth 0.07 on the hit rate. **A bench has
+  to be symmetric by construction; sampling cannot average away a structural
+  bias.** Every comparison test here needs a control that proves its bench is
+  level before the experiment on it means anything.
 
 ## Conventions
 
