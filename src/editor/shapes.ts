@@ -18,7 +18,7 @@ export interface Handle {
   /** Which point of the operation this is, in the order `moveHandle` expects. */
   index: number;
   pos: Vec2;
-  kind: 'point' | 'centre' | 'corner' | 'radius';
+  kind: 'point' | 'centre' | 'corner' | 'radius' | 'opening';
 }
 
 /** Points the author can drag, in the operation's own order. */
@@ -37,6 +37,11 @@ export function handlesOf(op: AnyOp): Handle[] {
       return [
         { index: 0, pos: op.a, kind: 'point' },
         { index: 1, pos: op.b, kind: 'point' },
+        ...(op.openings ?? []).map((o, i) => ({
+          index: 2 + i,
+          pos: alongWall(op.a, op.b, o.at),
+          kind: 'opening' as const,
+        })),
       ];
     case 'mound':
     case 'crater':
@@ -50,8 +55,20 @@ export function handlesOf(op: AnyOp): Handle[] {
         { index: 0, pos: op.min, kind: 'corner' },
         { index: 1, pos: op.max, kind: 'corner' },
       ];
-    case 'building':
-      return footprintOf(op).map((p, index) => ({ index, pos: p, kind: 'corner' as const }));
+    case 'building': {
+      const footprint = footprintOf(op);
+      // Corners first, then the openings, because `moveHandle` addresses them
+      // by position in this list and a building's corner count is what tells
+      // the two apart.
+      return [
+        ...footprint.map((p, index) => ({ index, pos: p, kind: 'corner' as const })),
+        ...(op.openings ?? []).map((o, i) => ({
+          index: footprint.length + i,
+          pos: openingPos(footprint, o.side ?? 0, o.at),
+          kind: 'opening' as const,
+        })),
+      ];
+    }
     default:
       return [];
   }
@@ -109,6 +126,59 @@ function unsweeten(op: StructureOp & { op: 'building' }): Vec2[] {
   return op.footprint;
 }
 
+/**
+ * Where an opening sits in the world.
+ *
+ * The file says "two metres along the north wall", which is how anybody would
+ * describe it and useless for drawing a handle. This is the one place that
+ * turns the description back into a point, so the viewport, the picker and the
+ * drag all agree about where a door is.
+ */
+export function alongWall(a: Vec2, b: Vec2, at: number | 'centre'): Vec2 {
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const d = at === 'centre' ? length / 2 : at;
+  const t = length > 1e-6 ? Math.max(0, Math.min(1, d / length)) : 0;
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+export function openingPos(footprint: Vec2[], side: number, at: number | 'centre'): Vec2 {
+  if (footprint.length === 0) return { x: 0, y: 0 };
+  const i = ((side % footprint.length) + footprint.length) % footprint.length;
+  return alongWall(footprint[i], footprint[(i + 1) % footprint.length], at);
+}
+
+/** How far along a wall a point falls, and how far off it is. */
+export function projectOntoWall(
+  a: Vec2, b: Vec2, p: Vec2,
+): { at: number; away: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 1e-12
+    ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+    : 0;
+  const x = a.x + dx * t;
+  const y = a.y + dy * t;
+  return { at: t * Math.sqrt(len2), away: Math.hypot(p.x - x, p.y - y) };
+}
+
+/**
+ * Which wall of a footprint a point is nearest, and where along it.
+ *
+ * This is what makes "put a window here" a click rather than an arithmetic
+ * problem the author does in his head about which wall `w2` was.
+ */
+export function nearestSide(
+  footprint: Vec2[], p: Vec2,
+): { side: number; at: number; away: number } {
+  let best = { side: 0, at: 0, away: Infinity };
+  for (let side = 0; side < footprint.length; side++) {
+    const hit = projectOntoWall(footprint[side], footprint[(side + 1) % footprint.length], p);
+    if (hit.away < best.away) best = { side, at: hit.at, away: hit.away };
+  }
+  return best;
+}
+
 /** Move one of an operation's points to somewhere new. */
 export function moveHandle(op: AnyOp, index: number, to: Vec2): void {
   switch (op.op) {
@@ -119,10 +189,14 @@ export function moveHandle(op: AnyOp, index: number, to: Vec2): void {
     case 'hedgerow':
       if (op.path[index]) op.path[index] = { ...to };
       break;
-    case 'wall':
-      if (index === 0) op.a = { ...to };
-      else op.b = { ...to };
+    case 'wall': {
+      if (index === 0) { op.a = { ...to }; break; }
+      if (index === 1) { op.b = { ...to }; break; }
+      const opening = (op.openings ?? [])[index - 2];
+      if (!opening) break;
+      opening.at = clampAlong(op.a, op.b, projectOntoWall(op.a, op.b, to).at, opening.width);
       break;
+    }
     case 'mound':
     case 'crater':
     case 'obstacle':
@@ -135,12 +209,42 @@ export function moveHandle(op: AnyOp, index: number, to: Vec2): void {
       break;
     case 'building': {
       const footprint = unsweeten(op);
-      if (footprint[index]) footprint[index] = { ...to };
+      if (index < footprint.length) {
+        footprint[index] = { ...to };
+        break;
+      }
+      // Past the corners: an opening. Dragged round a corner it changes which
+      // wall it belongs to, which is what makes moving a door to the other face
+      // a drag rather than an edit to a number and a dropdown.
+      const opening = (op.openings ?? [])[index - footprint.length];
+      if (!opening) break;
+      const hit = nearestSide(footprint, to);
+      opening.side = hit.side;
+      opening.at = clampAlong(footprint[hit.side],
+        footprint[(hit.side + 1) % footprint.length], hit.at, opening.width);
       break;
     }
     default:
       break;
   }
+}
+
+/**
+ * Keep an opening inside the wall it is cut into.
+ *
+ * Half its own width clear of each end, because an opening that runs off the
+ * corner is not an opening: `wall()` widens every gap by STAMP_FLOOR before
+ * cutting it, so one placed at the very end quietly takes the corner with it
+ * and the building stops being closed.
+ */
+function clampAlong(a: Vec2, b: Vec2, at: number, width: number): number {
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const margin = Math.min(width / 2 + 0.6, length / 2);
+  const held = Math.max(margin, Math.min(length - margin, at));
+  // To the centimetre. A door is not placed to within a thousandth of a
+  // millimetre, and a level file full of 11.737070086477031 is a level file
+  // nobody can read a diff of.
+  return Math.round(held * 100) / 100;
 }
 
 /** Shift a whole operation. */

@@ -273,6 +273,16 @@ Openings are addressed as *two metres along the north wall* — the way anybody
 would say it out loud — rather than as a fraction of the whole perimeter, which
 meant that widening a house moved every window in it.
 
+Openings are placed by pointing at the wall. `N` cuts a door or a window where
+you click, works out which wall that is and how far along, and leaves a handle
+you drag to slide it — round a corner too, which moves it onto the next wall.
+`J` draws a partition inside a building, and it belongs to that building rather
+than being a wall that happens to be indoors: it comes down when the building
+does, it is thinner than the shell, and it carries a doorway. The numeric rows
+are still in the inspector for when an exact position is wanted; they used to be
+the only way, which meant placing a window meant working out that `w2` was the
+third side of the footprint and then guessing at a distance.
+
 A window is an opening rather than a slot cut to the roof: it leaves a sill you
 shoot over and cannot climb through, and a lintel above it that is solid. That
 needed the sightline solver to learn a second question. It answers *how low can
@@ -335,6 +345,7 @@ because plenty of them are things an author did on purpose.
 |---|---|
 | `V` `X` `Q` | select, measure, sightline probe |
 | `B` `W` `L` `O` `H` | building, wall, low wall, obstacle, hedge |
+| `N` `J` | cut a door or window into a wall, divide a building |
 | `G` `R` `D` `K` `M` `C` `U` `P` | sculpt, road, ditch, bank, mound, crater, paint, patch |
 | `1` `2` `3` | operator, defender, objective |
 | `[` `]` | turn the selection (or the armed piece) |

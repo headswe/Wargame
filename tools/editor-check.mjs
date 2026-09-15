@@ -257,6 +257,77 @@ await page.keyboard.press('v');
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT}/editor.png` });
 
+// --- doors, windows and partitions by pointing rather than by arithmetic
+const wallMid = await page.evaluate(() => {
+  const fp = window.editor.doc.scene.structures.buildings[0].footprint;
+  const op = window.editor.doc.data.structures.find((o) => o.op === 'building');
+  window.editor.doc.select([op.id]);
+  return { x: (fp[0].x + fp[1].x) / 2, y: (fp[0].y + fp[1].y) / 2,
+    before: (op.openings ?? []).length };
+});
+await page.keyboard.press('n');
+await page.waitForTimeout(250);
+const wallPoint = await at(wallMid.x, wallMid.y);
+await page.mouse.click(wallPoint.x, wallPoint.y);
+await page.waitForTimeout(500);
+const cut = await page.evaluate(() => {
+  const op = window.editor.doc.data.structures.find((o) => o.op === 'building');
+  return { count: (op.openings ?? []).length, last: (op.openings ?? []).slice(-1)[0] };
+});
+check('clicking a wall cuts an opening into it',
+  cut.count === wallMid.before + 1 && cut.last && typeof cut.last.side === 'number',
+  `${wallMid.before} \u2192 ${cut.count}, side ${cut.last?.side} at ${cut.last?.at?.toFixed?.(2)}m`);
+
+// It has to be draggable, or it is still an arithmetic problem with a click in
+// front of it.
+const slid = await page.evaluate(() => {
+  const op = window.editor.doc.data.structures.find((o) => o.op === 'building');
+  const fp = window.editor.doc.scene.structures.buildings[0].footprint;
+  const o = op.openings[0];
+  const a = fp[o.side ?? 0];
+  const bb = fp[((o.side ?? 0) + 1) % fp.length];
+  const len = Math.hypot(bb.x - a.x, bb.y - a.y);
+  const t = (o.at === 'centre' ? len / 2 : o.at) / len;
+  return { from: o.at, hx: a.x + (bb.x - a.x) * t, hy: a.y + (bb.y - a.y) * t,
+    tx: a.x + (bb.x - a.x) * 0.8, ty: a.y + (bb.y - a.y) * 0.8 };
+});
+await page.keyboard.press('v');
+await page.waitForTimeout(200);
+await dragWorld(slid.hx, slid.hy, slid.tx, slid.ty);
+const now = await page.evaluate(() =>
+  window.editor.doc.data.structures.find((o) => o.op === 'building').openings[0].at);
+check('and its handle slides it along the wall',
+  Math.abs(now - slid.from) > 1 && Math.round(now * 100) === now * 100,
+  `${slid.from} \u2192 ${now}`);
+
+const partBefore = await page.evaluate(() => {
+  const op = window.editor.doc.data.structures.find((o) => o.op === 'building');
+  const fp = window.editor.doc.scene.structures.buildings[0].footprint;
+  const c = fp.reduce((a, p) => ({ x: a.x + p.x / fp.length, y: a.y + p.y / fp.length }),
+    { x: 0, y: 0 });
+  return { parts: (op.partitions ?? []).length, cx: c.x, cy: c.y, fp };
+});
+await page.keyboard.press('j');
+await page.waitForTimeout(250);
+for (const corner of [0, 2]) {
+  const e = partBefore.fp[corner];
+  const n = partBefore.fp[(corner + 1) % partBefore.fp.length];
+  const mid = { x: (e.x + n.x) / 2, y: (e.y + n.y) / 2 };
+  const q = await at(mid.x * 0.8 + partBefore.cx * 0.2, mid.y * 0.8 + partBefore.cy * 0.2);
+  await page.mouse.click(q.x, q.y);
+  await page.waitForTimeout(300);
+}
+await page.waitForTimeout(500);
+const partAfter = await page.evaluate(() => {
+  const op = window.editor.doc.data.structures.find((o) => o.op === 'building');
+  return { parts: (op.partitions ?? []).length, doorway: (op.partitions ?? []).slice(-1)[0]?.openings?.length };
+});
+check('a building can be divided from inside it',
+  partAfter.parts === partBefore.parts + 1 && partAfter.doorway > 0,
+  `${partBefore.parts} \u2192 ${partAfter.parts}, with ${partAfter.doorway} doorway`);
+await page.keyboard.press('v');
+await page.waitForTimeout(200);
+
 // --- the settings panel follows the tool
 // Measured from what is painted, never from the `hidden` property: `.field`
 // sets a display, an author display beats the browser's rule for [hidden], and

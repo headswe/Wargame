@@ -86,6 +86,8 @@ const defaults: Defaults = {
   team: 0,
   defender: 'rifle',
   doors: true,
+  opening: 'window',
+  openingWidth: 1.4,
 };
 
 let overlayMode: OverlayMode = 'none';
@@ -149,6 +151,8 @@ const TOOLBOX: { heading: string; items: ToolButton[] }[] = [
       { id: 'wall', label: 'Wall', key: 'W' },
       { id: 'revetment', label: 'Low wall', key: 'L' },
       { id: 'obstacle', label: 'Obstacle', key: 'O' },
+      { id: 'opening', label: 'Door / window', key: 'N' },
+      { id: 'partition', label: 'Partition', key: 'J' },
       { id: 'hedgerow', label: 'Hedge', key: 'H' },
     ],
   },
@@ -214,6 +218,8 @@ function buildToolbox(): void {
     defender: choiceSetting('Defender', 'defender',
       [['rifle', 'rifle'], ['gunner', 'belt-fed'], ['marksman', 'marksman']]),
     doors: boolSetting('Cut doors', 'doors'),
+    opening: choiceSetting('Cut a', 'opening', [['window', 'window'], ['door', 'door']]),
+    openingWidth: numberSetting('Width', 'openingWidth', 0.1),
   })) {
     settingRows.set(key, row);
     toolPanel.append(row);
@@ -249,6 +255,8 @@ const TOOL_SETTINGS: Partial<Record<ToolId, [string, string][]>> = {
   sculpt: [['brushMode', 'Brush does'], ['brushRadius', 'Brush'], ['brushStrength', 'Force']],
   paint: [['surface', 'Ground']],
   surface: [['surface', 'Ground'], ['brushRadius', 'Brush']],
+  opening: [['opening', 'Cut a'], ['openingWidth', 'Width']],
+  partition: [['doors', 'Cut doors']],
   'spawn-team': [['team', 'Team']],
   'spawn-enemy': [['defender', 'Armed with']],
 };
@@ -898,6 +906,7 @@ document.getElementById('menubar')!.addEventListener('click', (e) => {
 const HELP: [string, string][] = [
   ['V  X  Q', 'select, measure, sightline probe'],
   ['B  W  L  O  H', 'building, wall, low wall, obstacle, hedge'],
+  ['N  J', 'cut a door or window, divide a building'],
   ['G  R  D  K', 'sculpt, road, ditch, bank'],
   ['M  C  U  P', 'mound, crater, paint, patch'],
   ['1  2  3', 'operator, defender, objective'],

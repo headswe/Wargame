@@ -6,7 +6,8 @@ import {
 import { SURFACE_KEEP, Surface } from '../sim/world/terrain.ts';
 import type { AnyOp, EditorDoc } from './document.ts';
 import {
-  boundsOf, centreOf, distanceTo, handlesOf, moveHandle, outlineOf, rotate, translate,
+  boundsOf, centreOf, distanceTo, footprintOf, handlesOf, moveHandle, outlineOf,
+  projectOntoWall, rotate, translate,
 } from './shapes.ts';
 import type { Viewport } from './viewport.ts';
 
@@ -16,7 +17,8 @@ export type ToolId =
   | 'road' | 'cut' | 'bank' | 'mound' | 'crater' | 'paint'
   | 'sculpt'
   | 'spawn-team' | 'spawn-enemy' | 'spawn-objective'
-  | 'measure' | 'probe' | 'surface' | 'stamp';
+  | 'measure' | 'probe' | 'surface' | 'stamp'
+  | 'opening' | 'partition';
 
 /** Which tools collect a run of points before they make anything. */
 const DRAFTED: Partial<Record<ToolId, { points: number; op: AnyOp['op'] }>> = {
@@ -40,6 +42,9 @@ export interface Defaults {
   brushMode: 'raise' | 'smooth' | 'flatten';
   team: number;
   defender: DefenderKind;
+  /** What the opening tool cuts, and how wide. */
+  opening: 'door' | 'window';
+  openingWidth: number;
   doors: boolean;
 }
 
@@ -142,6 +147,18 @@ export class ToolHost {
 
     if (this.tool.startsWith('spawn-')) {
       this.placeSpawn(at);
+      return;
+    }
+
+    if (this.tool === 'opening') {
+      this.cutOpening(at);
+      return;
+    }
+
+    if (this.tool === 'partition') {
+      this.draft.push(at);
+      if (this.draft.length >= 2) this.finishPartition();
+      this.o.changed();
       return;
     }
 
@@ -478,6 +495,77 @@ export class ToolHost {
     }
     if (this.tool === 'crater') return { op: 'crater', at, radius: 5, depth: 1.2 };
     return { op: 'mound', at, radius: 14, peak: d.featureDepth };
+  }
+
+  /**
+   * An interior wall, belonging to the building it is drawn in.
+   *
+   * A partition is not a wall that happens to be indoors. It belongs to the
+   * building, so it comes down when the building does, it is thinner than the
+   * shell, and it carries a doorway — which is what makes an interior worth
+   * fighting through instead of one room you either hold or do not. The
+   * building was always able to describe them and there was no way to draw one.
+   */
+  private finishPartition(): void {
+    const [a, b] = this.draft.map((p) => this.snapped(p));
+    this.draft = [];
+    const { doc } = this.o;
+    const d = this.o.defaults();
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 0.8) {
+      this.o.status('too short to be a wall');
+      return;
+    }
+    // Whichever building contains the middle of it: drawn across a doorway or
+    // out through an outside wall, the midpoint is still the room it divides.
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const host = doc.data.structures.find(
+      (op): op is StructureOp & { op: 'building' } =>
+        op.op === 'building' && !op.muted && insidePolygon(footprintOf(op), mid),
+    );
+    if (!host) {
+      this.o.status('draw it inside a building \u2014 a partition belongs to one');
+      return;
+    }
+    doc.edit('add partition', () => {
+      (host.partitions ??= []).push({
+        a, b,
+        openings: d.doors ? [{ at: 'centre', width: 1.0, kind: 'door' }] : [],
+      });
+    });
+    doc.select([host.id!].filter(Boolean));
+    this.o.status('partition added');
+  }
+
+  // -------------------------------------------------------------- openings
+
+  /**
+   * Put a door or a window where the author pointed.
+   *
+   * Openings were only ever editable as a row of numbers — which wall, how many
+   * metres along — so placing one meant working out in your head that `w2` was
+   * the third side of the footprint and then guessing at a distance. Pointing
+   * at the wall is the whole feature; the numbers stay in the inspector for
+   * when somebody wants an exact one.
+   */
+  private cutOpening(at: Vec2): void {
+    const { doc } = this.o;
+    const d = this.o.defaults();
+    const found = nearestWallOf(doc.data.structures, at, OPENING_REACH);
+    if (!found) {
+      this.o.status('no wall near enough \u2014 point at one');
+      return;
+    }
+    const { op, side, along } = found;
+    doc.edit(`cut a ${d.opening}`, () => {
+      const openings = (op.openings ??= []);
+      const entry: Opening & { side?: number } = {
+        at: along, width: d.openingWidth, kind: d.opening,
+      };
+      if (op.op === 'building') entry.side = side;
+      openings.push(entry);
+    });
+    doc.select([op.id!].filter(Boolean));
+    this.o.status(`${d.opening} cut \u2014 drag its handle to slide it along the wall`);
   }
 
   // ---------------------------------------------------------------- spawns
@@ -863,6 +951,62 @@ const HINTS: Partial<Record<ToolId, string>> = {
   'spawn-objective': 'click to place the objective',
   surface: 'drag to paint the ground · hold Alt to lift the paint off',
   stamp: 'click to put the piece down \u00b7 [ and ] turn it',
+  opening: 'click a wall to cut a door or window into it',
+  partition: 'click two points inside a building to divide it',
   measure: 'click two points to measure between them',
   probe: 'click anywhere to see what a man standing there can see',
 };
+
+/** How far from a wall a click still counts as pointing at it. */
+const OPENING_REACH = 3.5;
+
+/**
+ * The wall nearest a point, across every building and free-standing run.
+ *
+ * Returns which side of a footprint it is and how far along, which is exactly
+ * the pair the level format wants — so the click and the file describe the
+ * opening the same way, and the inspector row that appears afterwards is the
+ * one the author would have typed.
+ */
+function nearestWallOf(
+  structures: StructureOp[], at: Vec2, reach: number,
+): { op: StructureOp & { openings?: (Opening & { side?: number })[] };
+     side: number; along: number } | null {
+  let best: { op: StructureOp; side: number; along: number; away: number } | null = null;
+  const consider = (op: StructureOp, side: number, a: Vec2, b: Vec2): void => {
+    const hit = projectOntoWall(a, b, at);
+    if (hit.away > reach) return;
+    if (best && hit.away >= best.away) return;
+    best = { op, side, along: hit.at, away: hit.away };
+  };
+
+  for (const op of structures) {
+    if (op.muted) continue;
+    if (op.op === 'building') {
+      const footprint = footprintOf(op);
+      for (let side = 0; side < footprint.length; side++) {
+        consider(op, side, footprint[side], footprint[(side + 1) % footprint.length]);
+      }
+    } else if (op.op === 'wall') {
+      consider(op, 0, op.a, op.b);
+    }
+    // Revetments and hedges are deliberately left out: a doorway in a sandbag
+    // revetment is a gap you leave rather than an opening you cut, and a hole
+    // in a hedge is what a hedge already is.
+  }
+  if (!best) return null;
+  const hit = best as { op: StructureOp; side: number; along: number };
+  return { op: hit.op, side: hit.side, along: hit.along };
+}
+
+/** Even-odd point-in-polygon, the same test the picker uses. */
+function insidePolygon(polygon: Vec2[], p: Vec2): boolean {
+  let hit = false;
+  for (let a = 0, b = polygon.length - 1; a < polygon.length; b = a++) {
+    const u = polygon[a];
+    const v = polygon[b];
+    if ((u.y > p.y) !== (v.y > p.y)
+      && p.x < ((v.x - u.x) * (p.y - u.y)) / (v.y - u.y) + u.x) hit = !hit;
+  }
+  return hit;
+}
