@@ -1,5 +1,6 @@
-import { type Vec2, vec } from '../sim/math.ts';
+import { type Vec2, dist, vec } from '../sim/math.ts';
 import type { Problem } from '../sim/world/level-data.ts';
+import { Stature } from '../sim/world/occlusion.ts';
 import type { Scene as SimScene } from '../sim/world/scene.ts';
 import type { LevelData } from '../sim/world/level-data.ts';
 
@@ -41,6 +42,39 @@ export function audit(scene: SimScene, data: LevelData): Problem[] {
             : `team ${t + 1} operator ${i + 1} starts somewhere nobody can stand`);
       }
     });
+  });
+
+  /**
+   * Nobody starts a contract already being shot at.
+   *
+   * A start line inside the defence's engagement envelope takes the first
+   * decision away from the player: he is in contact before he has looked at
+   * the ground, and the plan he was going to make is now a reaction. Kolna
+   * shipped like this — all three teams in view, one at twenty-seven metres and
+   * fully exposed — because the map was tuned to bring its dead-ground figure
+   * down and the approach was shortened until the start line sat inside the
+   * wire. A number nobody should have optimised, and a check that would have
+   * said so at the time.
+   */
+  data.spawns.teams.forEach((team, t) => {
+    let worst: { range: number; from: Vec2 } | null = null;
+    for (const p of team) {
+      for (const e of data.spawns.enemies) {
+        const view = scene.sight(
+          { x: e.pos.x, y: e.pos.y, eye: Stature.crouchedEye },
+          { x: p.x, y: p.y, base: 0, top: Stature.standingTop },
+        );
+        if (!view.visible) continue;
+        const range = dist(e.pos, p);
+        if (!worst || range < worst.range) worst = { range, from: e.pos };
+      }
+    }
+    if (worst) {
+      say('error', 'spawns',
+        `team ${t + 1} starts in plain view of a defender `
+        + `${worst.range.toFixed(0)}m away at `
+        + `${worst.from.x.toFixed(0)},${worst.from.y.toFixed(0)}`);
+    }
   });
 
   data.spawns.enemies.forEach((e, i) => {

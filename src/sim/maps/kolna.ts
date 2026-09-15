@@ -4,7 +4,7 @@ import type { LevelData, StructureOp } from '../world/level-data.ts';
 import { Surface } from '../world/terrain.ts';
 
 /**
- * "Kolna" — a grain depot behind a wall, 140 by 120 metres.
+ * "Kolna" — a grain depot behind a wall, 152 by 140 metres.
  *
  * Stepove is eighty metres of ploughed field and one decision about how to
  * cross it. This is the opposite problem, and that is the reason for it:
@@ -74,27 +74,44 @@ export const KOLNA_DATA: LevelData = {
     'The client wants the depot office and the ledgers in it. A walled yard, two ' +
     'grain sheds, and a dozen men who know the ground better than you do. There is ' +
     'no open field to cross here — every fight is at twenty metres, around a corner.',
-  size: { width: 140, height: 104 },
+  size: { width: 152, height: 140 },
 
   terrain: [
     { op: 'rolling', amplitude: 0.9, wavelength: 44, seed: 5 },
-    { op: 'paint', min: vec(0, 0), max: vec(140, 104), surface: Surface.Grass },
+    { op: 'paint', min: vec(0, 0), max: vec(152, 140), surface: Surface.Grass },
     {
       op: 'paint', name: 'hardstanding',
       min: vec(YARD.west, YARD.south), max: vec(YARD.east, YARD.north), surface: Surface.Gravel,
     },
-    { op: 'paint', name: 'the fields', min: vec(0, 78), max: vec(140, 104), surface: Surface.Crop },
+    { op: 'paint', name: 'the fields', min: vec(0, 80), max: vec(152, 140), surface: Surface.Crop },
     { op: 'mound', at: vec(70, 40), radius: 62, peak: 1.6 },
+
+    // The rise the assault forms up behind.
+    //
+    // Without it the start line is in plain view of the depot from the moment
+    // the mission begins, which takes the first decision away from the player:
+    // he is in contact before he has looked at the ground, and the plan he was
+    // going to make is a reaction instead. It also gives the approach something
+    // to be — dead ground on the near side, a crest to cross, and a reason the
+    // drainage channel on the east flank is worth the walk.
+    {
+      op: 'bank', name: 'the rise',
+      path: [vec(0, 116), vec(54, 113), vec(104, 114), vec(152, 111)],
+      width: 26, rise: 3.2,
+    },
 
     // The approach: a drainage channel down the east side, which is the one way
     // to come at the wall without being watched doing it.
     {
       op: 'cut', name: 'drainage channel',
-      path: [vec(132, 100), vec(126, 88), vec(124, 74), vec(126, 56)],
+      path: [vec(138, 134), vec(132, 112), vec(126, 90), vec(124, 74), vec(126, 56)],
       width: 5.5, depth: 1.8, surface: Surface.Mud,
     },
     // And the haul road, which is the fast way and the obvious one.
-    { op: 'road', name: 'haul road', path: [vec(70, 103), vec(70, 92), vec(68, 80), vec(70, 72)], width: 8 },
+    {
+      op: 'road', name: 'haul road',
+      path: [vec(70, 139), vec(71, 116), vec(70, 92), vec(68, 80), vec(70, 72)], width: 8,
+    },
     { op: 'road', name: 'yard road', path: [vec(70, 72), vec(70, 56), vec(70, 30)], width: 7 },
   ],
 
@@ -199,17 +216,19 @@ export const KOLNA_DATA: LevelData = {
     },
 
     // --- outside: what the assault forms up behind
-    { op: 'hedgerow', path: [vec(6, 88), vec(48, 86), vec(60, 89)], radius: 1.7 },
-    { op: 'hedgerow', path: [vec(82, 89), vec(120, 86), vec(136, 90)], radius: 1.7 },
-    { op: 'hedgerow', path: [vec(10, 77), vec(22, 75)], radius: 1.4 },
+    { op: 'hedgerow', name: 'the treeline', path: [vec(4, 126), vec(50, 123), vec(62, 127)], radius: 1.8 },
+    { op: 'hedgerow', name: 'the treeline', path: [vec(80, 127), vec(122, 123), vec(150, 128)], radius: 1.8 },
+    { op: 'hedgerow', name: 'field hedge', path: [vec(8, 104), vec(46, 101), vec(58, 104)], radius: 1.5 },
+    { op: 'hedgerow', name: 'field hedge', path: [vec(84, 103), vec(126, 100), vec(148, 104)], radius: 1.5 },
+    { op: 'hedgerow', path: [vec(10, 86), vec(24, 84)], radius: 1.4 },
     { op: 'hedgerow', path: [vec(4, 60), vec(6, 40), vec(4, 22)], radius: 1.5 },
   ],
 
   spawns: {
     teams: [
-      [vec(30, 97), vec(31.6, 97), vec(33.2, 97), vec(34.8, 97)],
-      [vec(68, 97), vec(69.6, 97), vec(71.2, 97), vec(72.8, 97)],
-      [vec(106, 97), vec(107.6, 97), vec(109.2, 97), vec(110.8, 97)],
+      [vec(28, 133), vec(29.6, 133), vec(31.2, 133), vec(32.8, 133)],
+      [vec(70, 133), vec(71.6, 133), vec(73.2, 133), vec(74.8, 133)],
+      [vec(114, 133), vec(115.6, 133), vec(117.2, 133), vec(118.8, 133)],
     ],
     objectives: [vec(66, 20)],
     // Eleven, not fourteen. Kolna's positions are sited to see something —
