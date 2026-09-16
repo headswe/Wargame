@@ -6,6 +6,7 @@ import type { FogOfWar } from './fog.ts';
 import { THEME } from './theme.ts';
 import { WallView } from './walls.ts';
 import { RoadView } from './roads.ts';
+import { RoofView } from './roofs.ts';
 
 /** Metres between terrain mesh vertices. Finer than this buys nothing at this camera. */
 const MESH_STEP = 1;
@@ -54,6 +55,7 @@ export class WorldView {
   private readonly terrainPositions: THREE.BufferAttribute;
   private readonly terrainColours: THREE.BufferAttribute;
   private readonly roads: RoadView;
+  readonly roofs: RoofView;
   private readonly cols: number;
   private readonly rows: number;
 
@@ -91,11 +93,14 @@ export class WorldView {
     this.terrainMesh.name = 'terrain';
     this.group.add(this.terrainMesh);
 
-    this.roads = new RoadView(scene, fog);
+    this.roads = new RoadView(scene);
     this.group.add(this.roads.mesh);
 
     this.walls = new WallView(scene);
     this.group.add(this.walls.mesh);
+
+    this.roofs = new RoofView(scene);
+    this.group.add(this.roofs.group);
 
     const solidProps = scene.structures.props.filter((p) => p.solidity !== Solidity.Concealment);
     const softProps = scene.structures.props.filter((p) => p.solidity === Solidity.Concealment);
@@ -135,6 +140,11 @@ export class WorldView {
     });
     this.flush();
 
+    // One place applies the fog, at the end, over everything in the group.
+    // The views must not patch their own materials as well: the patch declares
+    // a varying, and declaring it twice is a shader that does not compile — a
+    // failure that shows up as the mesh simply not being drawn, while still
+    // casting a shadow, and only in the game, because the editor has no fog.
     if (fog) {
       this.group.traverse((object) => {
         const material = (object as THREE.Mesh).material;

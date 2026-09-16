@@ -375,6 +375,15 @@ class Mission {
     iso.update(dt);
 
     this.worldView.update();
+    // Roofs come off the buildings the player's own men have reached, and stay
+    // on everywhere else. Only his own positions, so it can never become a way
+    // of finding out who is inside somewhere he has not been.
+    this.worldView.roofs.update(
+      this.sim.unitList
+        .filter((u) => u.faction === Faction.Player && u.state !== UnitState.Dead)
+        .map((u) => u.pos),
+      dt,
+    );
     this.unitViews.update(this.sim, dt, this.selected, iso.camera.quaternion);
     this.fog.update(this.sim, dt);
     this.effects.update(dt);

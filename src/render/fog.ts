@@ -58,6 +58,14 @@ export class FogOfWar {
    * version that actually hides anything.
    */
   applyTo(material: THREE.Material): void {
+    // Once per material, whoever asks. The patch declares `vFogWorld`, and a
+    // second copy is a redefinition: the shader fails to compile and three
+    // quietly draws nothing, which reads as a missing mesh rather than as an
+    // error. Cheap to make impossible; expensive to find.
+    const patched = material as THREE.Material & { fogged?: boolean };
+    if (patched.fogged) return;
+    patched.fogged = true;
+
     const texture = this.texture;
     const worldSize = this.worldSize;
 

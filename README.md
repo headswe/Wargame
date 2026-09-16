@@ -200,6 +200,26 @@ thousands of ticks a second, which is what makes it possible to ask a question
 like "why did the defence never fire" and get an answer in a few seconds rather
 than a play session. It also means the same seed replays exactly.
 
+## Buildings have roofs, and they come off when you arrive
+
+A building without a roof is a floor plan, and every structure here was an open
+box seen from above — which is most of why the village read as a diagram of a
+village rather than as one. A roof is the larger part of a building's
+silhouette, and silhouette is how anything is recognised at this distance.
+
+The cost is that half the fight happens indoors, so a roof lifts when the player
+is *at* that building: a man of his own inside it, or close enough outside to be
+going in. Keying it to his own men rather than to whoever is under there is what
+keeps the fog honest — a roof that lifted for any occupant would announce an
+ambush, and one that lifted for any occupant he can see would do the same thing
+while spectating, where he can see everybody. Asking only where his own men are
+cannot leak anything, because he already knows.
+
+Roof colours are deliberately further apart than wall colours. A village where
+every roof is the same grey reads as one mass; giving tile, corrugate and
+concrete their own colour is what lets you pick the school out from across the
+map and say "that one".
+
 ## Three tiers of testing, and only one of them is a test
 
 **Mechanics get asserted.** `hitChance` decides every engagement and multiplies

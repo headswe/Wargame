@@ -38,7 +38,7 @@ export class RoadView {
   /** Where along the centreline each vertex sits, so heights can be resampled. */
   private readonly samples: { x: number; y: number }[] = [];
 
-  constructor(scene: SimScene, fog?: { applyTo(material: THREE.Material): void }) {
+  constructor(scene: SimScene) {
     this.scene = scene;
 
     const position: number[] = [];
@@ -112,7 +112,6 @@ export class RoadView {
     material.polygonOffset = true;
     material.polygonOffsetFactor = -2;
     material.polygonOffsetUnits = -4;
-    fog?.applyTo(material);
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.receiveShadow = true;
