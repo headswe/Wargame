@@ -277,7 +277,19 @@ export function revetment(
   top = 0.95,
   thickness = 1.1,
   openings: (Opening & { side: number })[] = [],
+  curve = false,
 ): number[] {
+  /**
+   * Corners by default, unlike a road or a hedge.
+   *
+   * The other linear features curve because they are made by water, wheels or
+   * growth, none of which turns a corner. A revetment is built: a compound
+   * wall, a sandbag emplacement, a berm round a fuel dump. Every one of those
+   * is straight runs meeting at angles, and rounding them off would have
+   * quietly turned Kolna's rectangular yard into a racetrack. The author can
+   * still ask for a curve, for the cases where he wants a sweep.
+   */
+  if (curve) path = spline(path, Math.max(1.5, thickness * 2));
   const ids: number[] = [];
   for (let side = 0; side + 1 < path.length; side++) {
     ids.push(...wall(scene, {

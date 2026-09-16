@@ -45,6 +45,7 @@ export class EditorDoc {
   private terrainKey = '';
   private cachedHeights: Float32Array | null = null;
   private cachedSurface: Uint8Array | null = null;
+  private cachedRibbons: Scene['terrain']['ribbons'] = [];
 
   constructor(data: LevelData) {
     this.data = assignIds(structuredClone(data));
@@ -183,12 +184,18 @@ export class EditorDoc {
       // against a third of a second of re-running every shaping operation.
       scene.terrain.heights.set(this.cachedHeights);
       scene.terrain.surface.set(this.cachedSurface);
+      // The roads laid on that ground come back with it. Skipping the terrain
+      // ops skips the ones that record them, so without this a road simply
+      // stopped being drawn the moment anybody nudged a building — the ground
+      // was right and the thing standing on it had gone.
+      scene.terrain.ribbons.push(...this.cachedRibbons);
       applyLevel(scene, { ...this.data, terrain: [] });
     } else {
       applyLevel(scene, this.data);
       this.terrainKey = key;
       this.cachedHeights = new Float32Array(scene.terrain.heights);
       this.cachedSurface = new Uint8Array(scene.terrain.surface);
+      this.cachedRibbons = scene.terrain.ribbons.map((r) => ({ ...r }));
     }
 
     scene.bake();

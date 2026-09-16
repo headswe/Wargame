@@ -113,6 +113,8 @@ export type StructureOp = OpMeta & (
   | {
     op: 'revetment';
     path: Vec2[];
+    /** Sweep through the points instead of cornering at them. Off by default. */
+    curve?: boolean;
     fabric?: Fabric;
     top?: number;
     thickness?: number;
@@ -242,7 +244,8 @@ export function applyLevel(scene: Scene, data: LevelData): void {
         wall(scene, step);
         break;
       case 'revetment':
-        revetment(scene, step.path, step.fabric, step.top, step.thickness, step.openings);
+        revetment(scene, step.path, step.fabric, step.top, step.thickness, step.openings,
+          step.curve === true);
         break;
       case 'hedgerow':
         hedgerow(scene, step.path, step);

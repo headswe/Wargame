@@ -17,6 +17,15 @@ interface Field {
   key: string;
   label: string;
   kind: 'number' | 'text' | 'select' | 'bool';
+  /**
+   * This flag is off unless the file says otherwise.
+   *
+   * Most are the other way — an absent `doors` or `curve` means yes — and a
+   * checkbox that reads `Boolean(undefined)` would show every one of those as
+   * unticked while the world behaved as though it were ticked. A revetment is
+   * the exception: a compound wall is built in straight runs.
+   */
+  off?: boolean;
   step?: number;
   min?: number;
   max?: number;
@@ -74,7 +83,8 @@ function fieldsFor(op: AnyOp): Field[] {
         { key: 'fabric', label: 'made of', kind: 'select', options: FABRICS },
         { key: 'top', label: 'height', kind: 'number', step: 0.05, min: 0.2,
           hint: 'under 1.2m you can shoot over it' },
-        { key: 'thickness', label: 'thickness', kind: 'number', step: 0.05, min: 0.1 }];
+        { key: 'thickness', label: 'thickness', kind: 'number', step: 0.05, min: 0.1 },
+        { key: 'curve', label: 'curved', kind: 'bool', off: true }];
     case 'hedgerow':
       return [NAME,
         { key: 'radius', label: 'bushiness', kind: 'number', step: 0.1, min: 0.3 },
@@ -216,7 +226,7 @@ function field(f: Field, target: Record<string, unknown>, changed: () => void): 
   if (f.kind === 'bool') {
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.checked = target[f.key] !== false;
+    input.checked = f.off ? target[f.key] === true : target[f.key] !== false;
     input.onchange = () => {
       target[f.key] = input.checked;
       changed();

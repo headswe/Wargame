@@ -257,6 +257,68 @@ await page.keyboard.press('v');
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT}/editor.png` });
 
+// --- roads survive an edit that is not about them
+// The editor reuses cached ground whenever only structures moved, which means
+// the terrain operations do not re-run — and those are what record the road
+// centrelines the ribbon is drawn from. A road that simply stopped being drawn
+// the moment anybody nudged a building is the sort of thing only a check that
+// nudges a building ever finds.
+const ribbonsBefore = await page.evaluate(() => window.editor.doc.scene.terrain.ribbons.length);
+await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const b = doc.data.structures.find((o) => o.op === 'building');
+  doc.edit('nudge', () => { if (b.rect) b.rect.at.x += 1; else b.footprint[0].x += 1; });
+});
+await page.waitForTimeout(700);
+const ribbonsAfter = await page.evaluate(() => window.editor.doc.scene.terrain.ribbons.length);
+check('a road is still there after a building is moved',
+  ribbonsBefore > 0 && ribbonsAfter === ribbonsBefore,
+  `${ribbonsBefore} \u2192 ${ribbonsAfter}`);
+
+// --- the curve is a choice, made before drawing and changeable after
+const curveOf = async (key) => {
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.keyboard.press(key);
+  await page.waitForTimeout(600);
+  return page.evaluate(() => {
+    const row = [...document.querySelectorAll('#tools .field')]
+      .filter((r) => r.getClientRects().length > 0)
+      .find((r) => r.querySelector('label')?.textContent === 'Curved');
+    return row ? row.querySelector('input[type=checkbox]').checked : null;
+  });
+};
+const road = await curveOf('r');
+const lowWall = await curveOf('l');
+check('every linear tool offers the curve before you draw it',
+  road !== null && lowWall !== null, `road ${road}, low wall ${lowWall}`);
+// A road is made by wheels and a compound wall is built, so they start
+// opposite ways round. One shared default would be wrong half the time.
+check('and starts the way that kind of thing is usually made',
+  road === true && lowWall === false, `road ${road}, low wall ${lowWall}`);
+
+await page.evaluate(() => document.activeElement && document.activeElement.blur());
+await page.keyboard.press('v');
+await page.waitForTimeout(300);
+const straightened = await page.evaluate(async () => {
+  const doc = window.editor.doc;
+  const op = doc.data.terrain.find((o) => o.op === 'road');
+  const before = doc.scene.terrain.ribbons[0]?.centre.length ?? 0;
+  doc.select([op.id]);
+  const labels = [...document.querySelectorAll('#inspector .field label')].map((l) => l.textContent);
+  doc.edit('straighten', () => { op.curve = false; });
+  return { before, after: doc.scene.terrain.ribbons[0]?.centre.length ?? 0, labels };
+});
+check('and can be turned off on a road already laid',
+  straightened.labels.includes('curved') && straightened.after < straightened.before,
+  `${straightened.before} \u2192 ${straightened.after} points along it`);
+await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const op = doc.data.terrain.find((o) => o.op === 'road');
+  doc.edit('restore', () => { delete op.curve; });
+  doc.select([]);
+});
+await page.waitForTimeout(600);
+
 // --- doors, windows and partitions by pointing rather than by arithmetic
 const wallMid = await page.evaluate(() => {
   const fp = window.editor.doc.scene.structures.buildings[0].footprint;

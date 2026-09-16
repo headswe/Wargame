@@ -88,6 +88,8 @@ const defaults: Defaults = {
   doors: true,
   opening: 'window',
   openingWidth: 1.4,
+  curve: true,
+  curveWall: false,
 };
 
 let overlayMode: OverlayMode = 'none';
@@ -220,6 +222,8 @@ function buildToolbox(): void {
     doors: boolSetting('Cut doors', 'doors'),
     opening: choiceSetting('Cut a', 'opening', [['window', 'window'], ['door', 'door']]),
     openingWidth: numberSetting('Width', 'openingWidth', 0.1),
+    curve: boolSetting('Curved', 'curve'),
+    curveWall: boolSetting('Curved', 'curveWall'),
   })) {
     settingRows.set(key, row);
     toolPanel.append(row);
@@ -247,11 +251,12 @@ const TOOL_SETTINGS: Partial<Record<ToolId, [string, string][]>> = {
     ['doors', 'Cut doors']],
   building: [['fabric', 'Made of'], ['wallTop', 'Wall height'], ['thickness', 'Thick'],
     ['doors', 'Cut doors']],
-  revetment: [['fabric', 'Made of']],
-  road: [['featureWidth', 'Width']],
-  cut: [['featureWidth', 'Width'], ['featureDepth', 'Depth']],
-  bank: [['featureWidth', 'Width'], ['featureDepth', 'Rise']],
+  revetment: [['fabric', 'Made of'], ['curveWall', 'Curved']],
+  road: [['featureWidth', 'Width'], ['curve', 'Curved']],
+  cut: [['featureWidth', 'Width'], ['featureDepth', 'Depth'], ['curve', 'Curved']],
+  bank: [['featureWidth', 'Width'], ['featureDepth', 'Rise'], ['curve', 'Curved']],
   mound: [['featureDepth', 'Height']],
+  hedgerow: [['curve', 'Curved']],
   sculpt: [['brushMode', 'Brush does'], ['brushRadius', 'Brush'], ['brushStrength', 'Force']],
   paint: [['surface', 'Ground']],
   surface: [['surface', 'Ground'], ['brushRadius', 'Brush']],

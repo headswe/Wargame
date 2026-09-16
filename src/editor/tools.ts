@@ -45,6 +45,18 @@ export interface Defaults {
   /** What the opening tool cuts, and how wide. */
   opening: 'door' | 'window';
   openingWidth: number;
+  /**
+   * Draw linear features as a sweep through the points, or as corners.
+   *
+   * Two of them, because the right answer differs by what is being drawn. A
+   * road, a ditch, a bank and a hedge are made by wheels, water and growth,
+   * none of which turns a corner, so those sweep. A revetment is built —
+   * a compound wall, a sandbag emplacement — and those are straight runs
+   * meeting at angles. One shared checkbox would be wrong half the time and
+   * wrong silently, since the author only finds out after drawing the line.
+   */
+  curve: boolean;
+  curveWall: boolean;
   doors: boolean;
 }
 
@@ -432,19 +444,31 @@ export class ToolHost {
         };
         break;
       case 'revetment':
-        op = { op: 'revetment', path: points, fabric: d.fabric, top: 0.95, thickness: 1.1 };
+        op = {
+          op: 'revetment', path: points, fabric: d.fabric, top: 0.95, thickness: 1.1,
+          curve: d.curveWall,
+        };
         break;
       case 'hedgerow':
-        op = { op: 'hedgerow', path: points, radius: 1.5 };
+        op = { op: 'hedgerow', path: points, radius: 1.5, curve: d.curve };
         break;
       case 'road':
-        op = { op: 'road', path: points, width: d.featureWidth, surface: Surface.Road };
+        op = {
+          op: 'road', path: points, width: d.featureWidth, surface: Surface.Road,
+          curve: d.curve,
+        };
         break;
       case 'cut':
-        op = { op: 'cut', path: points, width: d.featureWidth, depth: d.featureDepth, surface: Surface.Mud };
+        op = {
+          op: 'cut', path: points, width: d.featureWidth, depth: d.featureDepth,
+          surface: Surface.Mud, curve: d.curve,
+        };
         break;
       default:
-        op = { op: 'bank', path: points, width: d.featureWidth, rise: d.featureDepth };
+        op = {
+          op: 'bank', path: points, width: d.featureWidth, rise: d.featureDepth,
+          curve: d.curve,
+        };
         break;
     }
 
