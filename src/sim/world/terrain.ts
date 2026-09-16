@@ -96,6 +96,24 @@ export class Terrain {
   readonly heights: Float32Array;
   readonly surface: Uint8Array;
 
+  /**
+   * The made surfaces laid over the ground, kept so they can be drawn as what
+   * they are.
+   *
+   * A road is carved into the heightfield and painted into the surface grid,
+   * and that is the whole truth as far as the simulation is concerned — footing
+   * and going come from the surface under a man's feet. It is not the whole
+   * truth for a renderer: a road painted into a grid is a smear, because the
+   * ground mesh interpolates colour between samples a metre apart and a road
+   * has an edge. Keeping the centreline lets it be drawn as a ribbon following
+   * the curve it was always described by.
+   *
+   * These are the densified spline, not the author's control points, so the
+   * drawn road and the carved road are the same curve by construction rather
+   * than by two pieces of code agreeing about Catmull-Rom.
+   */
+  readonly ribbons: { centre: Vec2[]; width: number; surface: Surface }[] = [];
+
   private dirtyBounds: Bounds | null = null;
 
   constructor(width: number, height: number, spacing = 0.5) {
@@ -246,6 +264,7 @@ export class Terrain {
     // bulldozing straight through the hill it was supposed to ride over.
     const centre = densify(path, Math.max(1, half));
     const centreHeights = centre.map((p) => this.heightAt(p.x, p.y));
+    this.ribbons.push({ centre: centre.map((p) => ({ ...p })), width, surface });
 
     this.forEachNear(centre, half + 2, (i, j, x, y) => {
       const { distance, t, segment } = this.projectToPath(centre, x, y);

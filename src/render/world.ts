@@ -5,6 +5,7 @@ import { Surface } from '../sim/world/terrain.ts';
 import type { FogOfWar } from './fog.ts';
 import { THEME } from './theme.ts';
 import { WallView } from './walls.ts';
+import { RoadView } from './roads.ts';
 
 /** Metres between terrain mesh vertices. Finer than this buys nothing at this camera. */
 const MESH_STEP = 1;
@@ -16,7 +17,12 @@ const SURFACE_COLOUR: Record<number, number> = {
   [Surface.Dirt]: 0x8b8275,
   [Surface.Grass]: 0x6f7a4e,
   [Surface.Crop]: 0x8c8358,
-  [Surface.Road]: 0x565049,
+  // The graded dirt a country road sits on, not the road itself — RoadView
+  // draws the carriageway as a ribbon over this. Painting the metalled colour
+  // into the surface grid as well gave a blurred grey band a metre wider than
+  // the road on every side, with no edge anywhere on it, and a road is mostly
+  // edge.
+  [Surface.Road]: 0x6e6353,
   [Surface.Gravel]: 0x7d7870,
   [Surface.Concrete]: 0x84807a,
   [Surface.Mud]: 0x5f5344,
@@ -47,6 +53,7 @@ export class WorldView {
   private readonly terrainMesh: THREE.Mesh;
   private readonly terrainPositions: THREE.BufferAttribute;
   private readonly terrainColours: THREE.BufferAttribute;
+  private readonly roads: RoadView;
   private readonly cols: number;
   private readonly rows: number;
 
@@ -83,6 +90,9 @@ export class WorldView {
     this.terrainMesh.receiveShadow = true;
     this.terrainMesh.name = 'terrain';
     this.group.add(this.terrainMesh);
+
+    this.roads = new RoadView(scene, fog);
+    this.group.add(this.roads.mesh);
 
     this.walls = new WallView(scene);
     this.group.add(this.walls.mesh);
@@ -197,6 +207,8 @@ export class WorldView {
     this.terrainPositions.needsUpdate = true;
     this.terrainColours.needsUpdate = true;
     this.terrainMesh.geometry.computeVertexNormals();
+    // The road is draped over this ground, so it moves with it.
+    this.roads.refresh();
   }
 }
 

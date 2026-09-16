@@ -255,6 +255,16 @@ rather than a function that happens to draw one.
 through by it; one laid after rides over it. The editor can reorder them because
 that distinction is the only way to say which you meant.
 
+Roads are drawn as the curve they are described by. The spline was always
+there — in the file and in the heightfield — but on screen a road was painted
+into the surface grid, so the ground mesh interpolated between a road sample
+and a grass sample a metre apart and what you saw was a grey smear with no edge
+anywhere on it. A road is mostly edge; it is the one deliberately made thing in
+a village, and the contrast between a made edge and the ragged ones around it is
+what says a place is inhabited. It is a ribbon over the ground now, following
+the same densified centreline the carve used, with a verge either side and the
+graded dirt underneath it left to the terrain.
+
 Terrain operations: `heightmap`, `surfacemap`, `rolling`, `mound`, `bank`,
 `cut`, `road`, `paint`, `crater`. Structures: `building`, `wall`, `revetment`,
 `hedgerow`, `obstacle`. Linear features follow a curve through their control
