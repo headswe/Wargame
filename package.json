@@ -13,7 +13,8 @@
     "playtest": "node tools/playtest.mjs",
     "balance": "node --experimental-strip-types tools/balance.ts",
     "editor-check": "node tools/editor-check.mjs",
-    "level-report": "node --experimental-strip-types tools/level-report.ts"
+    "level-report": "node --experimental-strip-types tools/level-report.ts",
+    "textures": "node tools/textures.mjs"
   },
   "dependencies": {
     "@types/earcut": "^3.0.0",
@@ -24,6 +25,7 @@
     "@types/node": "^22.20.2",
     "@types/three": "^0.186.0",
     "playwright": "^1.63.0",
+    "sharp": "^0.35.4",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   }

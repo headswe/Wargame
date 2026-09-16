@@ -28,6 +28,7 @@ npm test              # headless simulation tests
 npm run balance       # measured comparison of the scripted plans (`-- <map> [plan]`)
 npm run playtest      # drives the real game in a browser (needs `npm run dev` up)
 npm run editor-check  # drives the level editor in a browser (ditto)
+npm run textures      # re-fetch and re-cut the material textures
 ```
 
 Three pages, all served by the same dev server:
@@ -219,6 +220,26 @@ Roof colours are deliberately further apart than wall colours. A village where
 every roof is the same grey reads as one mass; giving tile, corrugate and
 concrete their own colour is what lets you pick the school out from across the
 map and say "that one".
+
+### Roofs are textured; nothing else is
+
+The material textures come from [Pixel-Furnace](https://textures.pixel-furnace.com),
+free for use in games, and are committed as game-specific derivatives: albedo and
+normal only, 512px, JPEG, about 500kB for six materials against 54MB for one of
+the originals. `npm run textures` regenerates them, `tools/textures.mjs` is the
+recipe, and `public/textures/CREDITS.md` records where each came from.
+
+Only roofs use them, which is a measurement rather than a stopping point. The
+game is played with a hundred and seventy metres of ground on screen, where a
+fifteen-metre wall is about a hundred pixels wide and any texture on it mipmaps
+down to its average colour before it reaches the eye. From this camera you see
+roof and ground; the walls are thin dark bands. The ground stays flat because it
+is the tactical surface — its shape is the information and the overlays are drawn
+on it, and busy ground fights both.
+
+Loading is optional by construction. Missing files leave the flat colour that
+already reads; a renderer that shows nothing because an image 404'd is worse than
+one that never had the image.
 
 ## Three tiers of testing, and only one of them is a test
 

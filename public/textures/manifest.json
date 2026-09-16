@@ -1,0 +1,35 @@
+{
+  "size": 512,
+  "materials": [
+    {
+      "name": "brick",
+      "metres": 2.4,
+      "pack": "Old_Red_Brick"
+    },
+    {
+      "name": "concrete",
+      "metres": 3.2,
+      "pack": "Dirty_Concrete"
+    },
+    {
+      "name": "timber",
+      "metres": 2,
+      "pack": "Old_Wood"
+    },
+    {
+      "name": "metal",
+      "metres": 2,
+      "pack": "Diamond_Plate"
+    },
+    {
+      "name": "tile",
+      "metres": 1.6,
+      "pack": "Red_Tiles"
+    },
+    {
+      "name": "shingle",
+      "metres": 2.2,
+      "pack": "Wooden_Shingles"
+    }
+  ]
+}

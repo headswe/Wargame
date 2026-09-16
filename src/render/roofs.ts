@@ -4,6 +4,7 @@ import earcut from 'earcut';
 import type { Vec2 } from '../sim/math.ts';
 import { Fabric } from '../sim/world/geometry.ts';
 import type { Scene as SimScene } from '../sim/world/scene.ts';
+import { type MaterialName, texture } from './textures.ts';
 
 /**
  * Roofs, and the rule for when you are allowed to see past one.
@@ -47,6 +48,8 @@ interface Style {
   colour: number;
   /** How far the ridge is drawn in from the eaves, as a fraction of the plan. */
   inset: number;
+  /** What it is covered with, if the textures are there. */
+  covering: MaterialName;
 }
 
 /**
@@ -59,11 +62,11 @@ interface Style {
  * this style of game puts its buildings in strong local colour.
  */
 const STYLE: Partial<Record<Fabric, Style>> = {
-  [Fabric.Brick]: { rise: 2.1, colour: 0x8c4a33, inset: 0.32 },
-  [Fabric.Timber]: { rise: 1.9, colour: 0x7a6038, inset: 0.34 },
-  [Fabric.Concrete]: { rise: 0, colour: 0x8a8a84, inset: 0 },
-  [Fabric.Metal]: { rise: 1.2, colour: 0x5d6b73, inset: 0.28 },
-  [Fabric.Sandbag]: { rise: 0, colour: 0x9a8b6a, inset: 0 },
+  [Fabric.Brick]: { rise: 2.1, colour: 0x9c5b40, inset: 0.32, covering: 'tile' },
+  [Fabric.Timber]: { rise: 1.9, colour: 0x8a7045, inset: 0.34, covering: 'shingle' },
+  [Fabric.Concrete]: { rise: 0, colour: 0x9a9a94, inset: 0, covering: 'concrete' },
+  [Fabric.Metal]: { rise: 1.2, colour: 0x6d7b83, inset: 0.28, covering: 'metal' },
+  [Fabric.Sandbag]: { rise: 0, colour: 0x9a8b6a, inset: 0, covering: 'concrete' },
 };
 
 interface Roof {
@@ -100,10 +103,15 @@ export class RoofView {
         color: style.colour,
         transparent: true,
         opacity: 1,
+        // White would let the texture speak for itself; the tint stays so that
+        // a roof still reads as tile or corrugate when the textures are absent,
+        // and so the colour separation between buildings survives either way.
         // Depth writing off once it is fading, or the half-there roof punches a
         // hole in everything drawn behind it.
         depthWrite: true,
       });
+
+      texture(material, style.covering, 1);
 
       const mesh = new THREE.Mesh(geometry, material);
       mesh.castShadow = true;
@@ -257,6 +265,22 @@ function build(plan: Vec2[], top: number, style: Style): THREE.BufferGeometry {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  /**
+   * Projected from straight above, in metres.
+   *
+   * A roof is very nearly a flat thing seen from overhead, so the slopes take a
+   * little stretching and nothing else does — against the alternative, which is
+   * unwrapping a hip roof properly for a view that will never show the gable
+   * end at more than a few degrees. Metres rather than a 0..1 unwrap means one
+   * scale across every building, so a big house is not a small house with
+   * bigger tiles on it.
+   */
+  const uv = new Float32Array((position.length / 3) * 2);
+  for (let v = 0; v < position.length / 3; v++) {
+    uv[v * 2] = position[v * 3];
+    uv[v * 2 + 1] = position[v * 3 + 2];
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geometry.setIndex(index);
   geometry.computeVertexNormals();
   return geometry;

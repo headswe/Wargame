@@ -96,3 +96,38 @@ test('a roof lifts for your own men and for nothing else', () => {
   for (let t = 0; t < 120; t++) view.update([{ x: -200, y: -200 }], 1 / 30);
   assert.ok(material.opacity > 0.9, `stuck at ${material.opacity.toFixed(2)}`);
 });
+
+test('every material the manifest promises is actually on disk', async () => {
+  /**
+   * The loader is deliberately forgiving — a missing texture leaves the flat
+   * colour that already reads, rather than failing — which is right at runtime
+   * and useless for noticing that a file never got written. A manifest naming
+   * six materials next to five on disk looks exactly like a decision not to
+   * texture the sixth. So the promise is checked here instead.
+   */
+  const { readFile, access } = await import('node:fs/promises');
+  const manifest = JSON.parse(await readFile('public/textures/manifest.json', 'utf8')) as {
+    size: number; materials: { name: string; metres: number }[];
+  };
+  assert.ok(manifest.materials.length > 0, 'the manifest lists nothing at all');
+
+  for (const material of manifest.materials) {
+    await access(`public/textures/${material.name}-albedo.jpg`);
+    assert.ok(material.metres > 0.2, `${material.name} has no sensible tile size`);
+  }
+});
+
+test('nothing in the shipped texture set is bigger than it needs to be', async () => {
+  // The originals run to 54MB. What is committed is a derivative sized for a
+  // camera that never gets close enough to see more, and it should stay that
+  // way: a repository is the wrong place to notice that an asset grew.
+  const { readdir, stat } = await import('node:fs/promises');
+  const files = (await readdir('public/textures')).filter((f) => f.endsWith('.jpg'));
+  let total = 0;
+  for (const f of files) {
+    const { size } = await stat(`public/textures/${f}`);
+    assert.ok(size < 400 * 1024, `${f} is ${(size / 1024).toFixed(0)}kB`);
+    total += size;
+  }
+  assert.ok(total < 2 * 1024 * 1024, `${(total / 1024).toFixed(0)}kB of textures`);
+});
