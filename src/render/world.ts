@@ -375,8 +375,21 @@ export function buildLighting(scene: SimScene): THREE.Group {
   cam.near = 1;
   cam.far = 320;
   cam.updateProjectionMatrix();
-  sun.shadow.bias = -0.0015;
-  sun.shadow.normalBias = 0.04;
+  /**
+   * Shadow bias is a fraction of the shadow camera's depth range, and that
+   * range is the whole map seen from the sun — 319 metres of it. So -0.0015
+   * was not a nudge, it was 48cm along the light ray: every wall, post and
+   * building stood in a band of lit ground three hand-widths wide, with its
+   * shadow starting well clear of its own base. The walls looked like they
+   * were hovering, and they were not; the shadows were.
+   *
+   * Say it in metres and convert, so the number survives anyone resizing the
+   * frustum. Acne is held off by normalBias instead, which is in world units
+   * already and so does not have this trap in it.
+   */
+  const SHADOW_SLOP = 0.03;
+  sun.shadow.bias = -SHADOW_SLOP / (cam.far - cam.near);
+  sun.shadow.normalBias = 0.05;
 
   group.add(sun, sun.target);
   return group;
