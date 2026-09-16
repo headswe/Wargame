@@ -38,6 +38,8 @@ interface Piece {
 }
 
 const VERTS_PER_BOX = 36;
+/** How far a ground-sitting piece is sunk into the earth, in metres. */
+const FOUNDATION = 0.25;
 
 /** Per-face shade, standing in for light a single Lambert term will not give. */
 const TOP = 1.16;
@@ -412,9 +414,30 @@ export class WallView {
       // in steps rather than floating off one end of it.
       const y = this.scene.heightAt(x, z) + piece.v;
 
+      /**
+       * Anything resting on the ground is buried a little into it.
+       *
+       * The ground is sampled at the piece's own centre, so on any slope its
+       * corners are above ground at one end by however much the ground fell
+       * across its length — measured at up to 18cm on Stepove, which at this
+       * scale is a visible line of daylight under a wall, and the shadow
+       * starting away from the wall is what gives it away. Sinking the base
+       * course by more than that costs nothing: the buried part is underground
+       * and the top of the piece does not move.
+       *
+       * Only pieces that start at ground level. A coping, a lintel or an upper
+       * course would simply become taller.
+       */
+      let sv = piece.sv;
+      let lift = 0;
+      if (piece.v - piece.sv / 2 < 0.05) {
+        sv += FOUNDATION;
+        lift = -FOUNDATION / 2;
+      }
+
       this.matrix.makeRotationY(-(heading + (piece.yaw ?? 0)));
-      this.matrix.scale(new THREE.Vector3(piece.su, piece.sv, piece.sw));
-      this.matrix.setPosition(x, y, z);
+      this.matrix.scale(new THREE.Vector3(piece.su, sv, piece.sw));
+      this.matrix.setPosition(x, y + lift, z);
       this.colour.setHex(base).multiplyScalar(piece.tint * grime);
       this.emit(offset, this.matrix, this.colour);
     }

@@ -166,6 +166,29 @@ export interface BuildingSpec {
  * because surface decides footing, so crossing a room is quicker than crossing
  * the field outside it.
  */
+/**
+ * How wide the bank against a building is allowed to get, in metres.
+ *
+ * Chosen off a measurement rather than by eye, because this is terrain and
+ * terrain is where the defence looks for cover. Widening the skirt smooths the
+ * step at the wall, and past about three and a half metres it starts reaching
+ * the ground `digIn` searches — at which point the defenders find good enough
+ * positions where they stand and the commander stops having anywhere better to
+ * send them.
+ *
+ *   skirt   step at the wall   defence moves
+ *   1.5m    0.486m             4.46m
+ *   2.5m    0.226m             4.46m
+ *   3.5m    0.123m             4.46m
+ *   5.0m    0.079m             3.13m
+ *   7.0m    0.079m             3.13m
+ *
+ * Three and a half takes three quarters of the step out and costs nothing.
+ * Beyond it the picture barely improves and the defence gives up a third of its
+ * movement, which is the thing this game is about.
+ */
+const SKIRT_LIMIT = 3.5;
+
 const FLOOR_OF: Partial<Record<Fabric, Surface>> = {
   [Fabric.Brick]: Surface.Concrete,
   [Fabric.Concrete]: Surface.Concrete,
@@ -192,10 +215,28 @@ export function building(scene: Scene, spec: BuildingSpec): number[] {
    * and taking the minimum would bury the uphill wall to its windows.
    */
   if (spec.floor !== false) {
-    const level = footprint.reduce((a, p) => a + scene.terrain.heightAt(p.x, p.y), 0)
-      / footprint.length;
+    const corners = footprint.map((p) => scene.terrain.heightAt(p.x, p.y));
+    const level = corners.reduce((a, h) => a + h, 0) / corners.length;
+    /**
+     * The earth banked against the building, widened to suit how far it has to
+     * travel.
+     *
+     * A fixed skirt was the bug. Levelling to the mean cuts into the hill on
+     * one side and stands proud on the other — which is what a building on a
+     * slope does — but a metre and a half of blend for a drop of two thirds of
+     * a metre is a twenty-seven degree bank starting at the wall, and from
+     * above that reads as the wall hanging over a step rather than standing on
+     * anything. Measured at a Stepove house: floor 3.64, ground two metres out
+     * 4.31.
+     *
+     * Widening it in proportion to the drop turns the step into a bank, which
+     * is also what actually happens to the dirt round a building that has been
+     * there any length of time.
+     */
+    const drop = Math.max(...corners.map((h) => Math.abs(h - level)));
     scene.terrain.pad(footprint, level, {
       surface: spec.floorSurface ?? FLOOR_OF[fabric] ?? Surface.Dirt,
+      skirt: Math.max(1.5, Math.min(SKIRT_LIMIT, 1.5 + drop * 4.5)),
     });
   }
 
