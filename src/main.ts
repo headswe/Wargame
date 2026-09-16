@@ -12,6 +12,7 @@ import { Ordnance } from './sim/ordnance.ts';
 import { OrdnanceView } from './render/ordnance.ts';
 
 import { IsoCamera } from './render/camera.ts';
+import { THEME } from './render/theme.ts';
 import { WorldView, buildLighting } from './render/world.ts';
 import { UnitViews } from './render/units.ts';
 import { FogOfWar } from './render/fog.ts';
@@ -36,9 +37,18 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Filmic rather than linear. Nothing was tone mapped at all, which is why a
+// village of brick, grass and ploughed earth came out as three shades of the
+// same mud: linear output crushes everything bright toward white and everything
+// else into the middle, and the middle is where all of these colours live.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0d0f0d);
+scene.background = new THREE.Color(THEME.haze);
+// Far enough out that it never touches the fight, near enough that the map does
+// not simply stop. The near distance is most of a map away.
+scene.fog = new THREE.Fog(THEME.haze, 120, 460);
 
 const iso = new IsoCamera();
 

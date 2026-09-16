@@ -27,6 +27,18 @@ export const THEME = {
 
   sky: 0xb9c4cc,
   sun: 0xfff2df,
+
+  /**
+   * The air, and what the ground dissolves into at the far edge.
+   *
+   * Without it the map ended in a cliff with a black void under it, which read
+   * as a model on a table rather than as ground going on past where you can
+   * see. A haze the colour of a cold overcast morning is also most of what
+   * gives an isometric view any depth at all: near things read as near because
+   * far things are washed out, and nothing else in this projection says so.
+   */
+  haze: 0x2c3330,
+  hazeLit: 0x424a44,
 } as const;
 
 /** Slight per-tile lightness variation so large wall runs do not look printed. */

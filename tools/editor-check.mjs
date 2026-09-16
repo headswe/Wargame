@@ -265,6 +265,7 @@ const wallMid = await page.evaluate(() => {
   return { x: (fp[0].x + fp[1].x) / 2, y: (fp[0].y + fp[1].y) / 2,
     before: (op.openings ?? []).length };
 });
+await page.evaluate(() => document.activeElement && document.activeElement.blur());
 await page.keyboard.press('n');
 await page.waitForTimeout(250);
 const wallPoint = await at(wallMid.x, wallMid.y);
@@ -307,6 +308,7 @@ const partBefore = await page.evaluate(() => {
     { x: 0, y: 0 });
   return { parts: (op.partitions ?? []).length, cx: c.x, cy: c.y, fp };
 });
+await page.evaluate(() => document.activeElement && document.activeElement.blur());
 await page.keyboard.press('j');
 await page.waitForTimeout(250);
 for (const corner of [0, 2]) {
@@ -334,8 +336,15 @@ await page.waitForTimeout(200);
 // the first version of this shipped with every setting still on screen while a
 // probe that asked `el.hidden` cheerfully reported them gone.
 const settingsFor = async (key) => {
+  // Out of whatever inspector field the previous check left focused. The editor
+  // deliberately ignores tool shortcuts while an input has focus — you are
+  // typing — so without this the tool never changes and every reading below is
+  // of the previous tool's panel.
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await page.keyboard.press(key);
-  await page.waitForTimeout(250);
+  // Generous, because a scene rebuild from the edits above can be most of a
+  // frame budget and the panel follows the tool from inside the draw loop.
+  await page.waitForTimeout(600);
   return page.evaluate(() => [...document.querySelectorAll('#tools .field')]
     .filter((r) => r.getClientRects().length > 0)
     .map((r) => r.querySelector('label')?.textContent));

@@ -8,6 +8,9 @@ import { WallView } from './walls.ts';
 
 /** Metres between terrain mesh vertices. Finer than this buys nothing at this camera. */
 const MESH_STEP = 1;
+/** How far the drawn ground runs past the edge of the playable level, in metres. */
+const APRON = 70;
+const HAZE = new THREE.Color(THEME.haze);
 
 const SURFACE_COLOUR: Record<number, number> = {
   [Surface.Dirt]: 0x8b8275,
@@ -67,8 +70,8 @@ export class WorldView {
     this.scene = scene;
     this.group.name = 'world';
 
-    this.cols = Math.floor(scene.width / MESH_STEP) + 1;
-    this.rows = Math.floor(scene.height / MESH_STEP) + 1;
+    this.cols = Math.floor((scene.width + APRON * 2) / MESH_STEP) + 1;
+    this.rows = Math.floor((scene.height + APRON * 2) / MESH_STEP) + 1;
 
     const geometry = buildTerrainGeometry(scene, this.cols, this.rows);
     this.terrainPositions = geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -181,20 +184,15 @@ export class WorldView {
   }
 
   private refreshTerrain(): void {
+    // Through the same function that built it. These were two separate loops
+    // computing the same vertex, which is how a crater came to move the whole
+    // map seventy metres sideways and strip its shading the moment the apron
+    // was added: one loop knew about it and the other did not.
     const positions = this.terrainPositions.array as Float32Array;
     const colours = this.terrainColours.array as Float32Array;
     let v = 0;
     for (let j = 0; j < this.rows; j++) {
-      for (let i = 0; i < this.cols; i++) {
-        const x = i * MESH_STEP;
-        const y = j * MESH_STEP;
-        positions[v * 3 + 1] = this.scene.heightAt(x, y);
-        this.colour.set(SURFACE_COLOUR[this.scene.terrain.surfaceAt(x, y)] ?? 0x8b8275);
-        colours[v * 3] = this.colour.r;
-        colours[v * 3 + 1] = this.colour.g;
-        colours[v * 3 + 2] = this.colour.b;
-        v++;
-      }
+      for (let i = 0; i < this.cols; i++) writeTerrainVertex(this.scene, i, j, positions, colours, v++);
     }
     this.terrainPositions.needsUpdate = true;
     this.terrainColours.needsUpdate = true;
@@ -202,25 +200,112 @@ export class WorldView {
   }
 }
 
+/**
+ * Deterministic value noise. Not `Math.random`, because a field that looks
+ * different every time the level is opened is a field the author cannot judge.
+ */
+function hash(x: number, y: number): number {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function noiseAt(x: number, y: number, scale: number): number {
+  const gx = x / scale;
+  const gy = y / scale;
+  const i = Math.floor(gx);
+  const j = Math.floor(gy);
+  const fx = gx - i;
+  const fy = gy - j;
+  // Smoothstep between the four corners, so it reads as patchiness rather than
+  // as a grid of squares.
+  const u = fx * fx * (3 - 2 * fx);
+  const w = fy * fy * (3 - 2 * fy);
+  const a = hash(i, j);
+  const b = hash(i + 1, j);
+  const c = hash(i, j + 1);
+  const d = hash(i + 1, j + 1);
+  return (a * (1 - u) + b * u) * (1 - w) + (c * (1 - u) + d * u) * w;
+}
+
+/**
+ * How much darker or lighter this patch of ground is than its surface's colour.
+ *
+ * Three things, none of which the lighting can supply. Coarse patchiness,
+ * because a ploughed field is not one colour and a flat fill reads as painted
+ * card. Slope, because ground that pitches has thinner cover on it and catches
+ * the light differently from ground that lies flat. And a darkening in the
+ * angle where something solid meets the earth — the cheapest possible ambient
+ * occlusion, computed once at build time, and the thing that stops a building
+ * looking like it was pasted on top of the map rather than standing on it.
+ */
+function groundShade(scene: SimScene, x: number, y: number): number {
+  const patch = 0.92 + noiseAt(x, y, 17) * 0.16;
+  const grain = 0.97 + noiseAt(x, y, 3.5) * 0.06;
+  const slope = 1 - Math.min(scene.terrain.slopeAt(x, y), 1) * 0.18;
+
+  let contact = 1;
+  const reach = 2.2;
+  for (const id of scene.structures.segmentsInBox(x - reach, y - reach, x + reach, y + reach)) {
+    const seg = scene.structures.segments[id];
+    if (!seg || seg.destroyed || seg.sill > 0) continue;
+    const dx = seg.b.x - seg.a.x;
+    const dy = seg.b.y - seg.a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 1e-9
+      ? Math.max(0, Math.min(1, ((x - seg.a.x) * dx + (y - seg.a.y) * dy) / len2))
+      : 0;
+    const d = Math.hypot(x - (seg.a.x + dx * t), y - (seg.a.y + dy * t)) - seg.thickness / 2;
+    if (d >= reach) continue;
+    // Deepest right against the wall, gone by the time you are two metres off.
+    contact = Math.min(contact, 0.62 + 0.38 * Math.max(0, d / reach));
+  }
+
+  return patch * grain * slope * contact;
+}
+
+const scratch = new THREE.Color();
+
+/**
+ * One vertex of the drawn ground: where it is and what colour.
+ *
+ * The single place that knows the mesh is offset by an apron, so building the
+ * geometry and refreshing it after a crater cannot disagree about where the map
+ * starts.
+ */
+function writeTerrainVertex(
+  scene: SimScene, i: number, j: number,
+  positions: Float32Array, colours: Float32Array, v: number,
+): void {
+  const x = i * MESH_STEP - APRON;
+  const y = j * MESH_STEP - APRON;
+  // Outside the level, the ground is the nearest real ground carried outward
+  // and sagging gently away. It is not playable and nothing in the simulation
+  // knows it exists; it is there so the map stops being a slab of earth
+  // floating over a void, which is what it looked like.
+  const sx = Math.max(0, Math.min(scene.width, x));
+  const sy = Math.max(0, Math.min(scene.height, y));
+  const out = Math.hypot(x - sx, y - sy);
+
+  positions[v * 3] = x;
+  positions[v * 3 + 1] = scene.heightAt(sx, sy) - (out / APRON) ** 2 * 7;
+  positions[v * 3 + 2] = y;
+
+  scratch.set(SURFACE_COLOUR[scene.terrain.surfaceAt(sx, sy)] ?? 0x8b8275);
+  scratch.multiplyScalar(groundShade(scene, sx, sy));
+  // And it fades into the air, so there is no line where the level ends.
+  if (out > 0) scratch.lerp(HAZE, Math.min(1, (out / APRON) ** 0.8));
+  colours[v * 3] = scratch.r;
+  colours[v * 3 + 1] = scratch.g;
+  colours[v * 3 + 2] = scratch.b;
+}
+
 function buildTerrainGeometry(scene: SimScene, cols: number, rows: number): THREE.BufferGeometry {
   const positions = new Float32Array(cols * rows * 3);
   const colours = new Float32Array(cols * rows * 3);
-  const colour = new THREE.Color();
 
   let v = 0;
   for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) {
-      const x = i * MESH_STEP;
-      const y = j * MESH_STEP;
-      positions[v * 3] = x;
-      positions[v * 3 + 1] = scene.heightAt(x, y);
-      positions[v * 3 + 2] = y;
-      colour.set(SURFACE_COLOUR[scene.terrain.surfaceAt(x, y)] ?? 0x8b8275);
-      colours[v * 3] = colour.r;
-      colours[v * 3 + 1] = colour.g;
-      colours[v * 3 + 2] = colour.b;
-      v++;
-    }
+    for (let i = 0; i < cols; i++) writeTerrainVertex(scene, i, j, positions, colours, v++);
   }
 
   const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);
