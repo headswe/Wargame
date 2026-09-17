@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import type { Scene as SimScene } from '../sim/world/scene.ts';
 import { Surface } from '../sim/world/terrain.ts';
+import { GROUND_RAMP, grainOnGround } from './ground.ts';
 
 /**
  * Roads, drawn as the curve they were always described by.
@@ -43,6 +44,10 @@ export class RoadView {
 
     const position: number[] = [];
     const colour: number[] = [];
+    // Where each vertex sits on the ground ramp, and how much grain to admit.
+    // A road is ground: it wants the same photographed surface the terrain has,
+    // or it is the one dead-flat thing left in the frame — which is what it was.
+    const made: number[] = [];
     const index: number[] = [];
     const tint = new THREE.Color();
 
@@ -51,6 +56,7 @@ export class RoadView {
       if (centre.length < 2) continue;
       const half = width / 2;
       const palette = COLOUR[ribbon.surface] ?? COLOUR[Surface.Road];
+      const metalled = GROUND_RAMP[ribbon.surface] ?? GROUND_RAMP[Surface.Road];
       const base = index.length === 0 ? 0 : position.length / 3;
       let row = base;
 
@@ -81,6 +87,9 @@ export class RoadView {
           const wear = edge ? 0.94 : 1 + Math.sin(i * 0.7) * 0.035;
           tint.multiplyScalar(wear);
           colour.push(tint.r, tint.g, tint.b);
+          // The verge is half made ground and half the field it runs through,
+          // which is the whole point of having one.
+          made.push(edge ? (metalled + GROUND_RAMP[Surface.Dirt]) / 2 : metalled, 1);
         }
 
         if (i > 0) {
@@ -101,11 +110,15 @@ export class RoadView {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colour, 3));
+    geometry.setAttribute('aGround', new THREE.Float32BufferAttribute(made, 2));
     geometry.setIndex(index);
     geometry.computeVertexNormals();
     this.positions = geometry.getAttribute('position') as THREE.BufferAttribute;
 
     const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Before `WorldView` hands the group to the fog, which composes onto
+    // whatever it finds and would be lost if this were installed after it.
+    grainOnGround(material);
     // Polygon offset as well as the lift: at a shallow enough camera angle a
     // few centimetres is not enough, and z-fighting on a road reads as the
     // ground flickering.

@@ -14,8 +14,9 @@ npm run typecheck     # tsc --noEmit (also runs as part of build)
 npm run build         # typecheck + vite build
 npm run balance       # scripted assaults, measured — see "Measure before you argue"
 npm run level-report  # ground analysis for every shipped level
-npm run playtest      # drives the real game in a browser   } both need
+npm run playtest      # drives the real game in a browser   } all three need
 npm run editor-check  # drives the level editor in a browser } `npm run dev` up
+npm run ground-grain  # how broken up the drawn ground is    }
 ```
 
 A single test file: `node --test --experimental-strip-types test/sim.test.ts`.
@@ -114,8 +115,10 @@ over shipped and player-built levels alike; `test/level.test.ts` holds the
 shipped ones to zero problems and the editor refuses to publish on an error.
 Add level rules here, not as a test hardcoded against one map.
 
-**3. Gameplay — measure and report, never assert.** `npm run balance`. It is an
-instrument, not a scoreboard. It has no pass and no fail on purpose.
+**3. Gameplay and looks — measure and report, never assert.** `npm run balance`
+and `npm run ground-grain`. They are instruments, not scoreboards. They have no
+pass and no fail on purpose: the number means nothing on its own, and everything
+next to the same reading taken before the change.
 
 **Do not write a test asserting that one plan beats another.** There was one
 (`test/tactics.test.ts`, deleted). It was 87% of the suite's runtime for a
@@ -150,6 +153,16 @@ Habits this repo has paid for:
 - **Do not turn a stopping condition into a metric.** The 200s cutoff in the
   harness is a control so runs are comparable; it is not a win condition, and
   the game has no clock.
+- **A probe that samples one spot will sample the wrong spot.** Four sample
+  points for `ground-grain` were read straight out of the level file and every
+  one was wrong — a hedgerow, the bottom of the ditch, across a kerb, out on the
+  hazed apron — and each reported a confident number. Widening to the whole
+  canvas does not save you either: buildings and their shadows swamp the ground,
+  and a change that took grass from untextured to fully textured moved the
+  whole-frame figure by 0.2. **Write out the pixels you measured and look at
+  them.** The same lesson arrived through a rendering bug in the same week: two
+  probes agreed the walls were properly buried, which was true and irrelevant,
+  because what the eye was reading was where the shadow started.
 - **Measure the noise floor before believing a gap.** Writing the duel bench in
   `test/combat.test.ts`, eight seeds showed one side 0.9 men ahead on identical
   ground. More seeds appeared to fix it and then it came back — the tell that

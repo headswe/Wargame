@@ -7,6 +7,7 @@ import { THEME } from './theme.ts';
 import { WallView } from './walls.ts';
 import { RoadView } from './roads.ts';
 import { RoofView } from './roofs.ts';
+import { GROUND_RAMP, grainOnGround } from './ground.ts';
 
 /** Metres between terrain mesh vertices. Finer than this buys nothing at this camera. */
 const MESH_STEP = 1;
@@ -54,6 +55,7 @@ export class WorldView {
   private readonly terrainMesh: THREE.Mesh;
   private readonly terrainPositions: THREE.BufferAttribute;
   private readonly terrainColours: THREE.BufferAttribute;
+  private readonly terrainRamp: THREE.BufferAttribute;
   private readonly roads: RoadView;
   readonly roofs: RoofView;
   private readonly cols: number;
@@ -85,10 +87,12 @@ export class WorldView {
     const geometry = buildTerrainGeometry(scene, this.cols, this.rows);
     this.terrainPositions = geometry.getAttribute('position') as THREE.BufferAttribute;
     this.terrainColours = geometry.getAttribute('color') as THREE.BufferAttribute;
-    this.terrainMesh = new THREE.Mesh(
-      geometry,
-      new THREE.MeshLambertMaterial({ vertexColors: true }),
-    );
+    this.terrainRamp = geometry.getAttribute('aGround') as THREE.BufferAttribute;
+    const earth = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Before the fog patch below, which composes onto whatever it finds and
+    // would be lost if this were installed afterwards.
+    grainOnGround(earth);
+    this.terrainMesh = new THREE.Mesh(geometry, earth);
     this.terrainMesh.receiveShadow = true;
     this.terrainMesh.name = 'terrain';
     this.group.add(this.terrainMesh);
@@ -210,12 +214,17 @@ export class WorldView {
     // was added: one loop knew about it and the other did not.
     const positions = this.terrainPositions.array as Float32Array;
     const colours = this.terrainColours.array as Float32Array;
+    const ramp = this.terrainRamp.array as Float32Array;
     let v = 0;
     for (let j = 0; j < this.rows; j++) {
-      for (let i = 0; i < this.cols; i++) writeTerrainVertex(this.scene, i, j, positions, colours, v++);
+      for (let i = 0; i < this.cols; i++) {
+        writeTerrainVertex(this.scene, i, j, positions, colours, ramp, v++);
+      }
     }
     this.terrainPositions.needsUpdate = true;
     this.terrainColours.needsUpdate = true;
+    // A crater turns grass into churned earth, so the ramp moves with it.
+    this.terrainRamp.needsUpdate = true;
     this.terrainMesh.geometry.computeVertexNormals();
     // The road is draped over this ground, so it moves with it.
     this.roads.refresh();
@@ -250,19 +259,71 @@ function noiseAt(x: number, y: number, scale: number): number {
 }
 
 /**
+ * Whether this patch stands above the ground around it or sits below it:
+ * +1 a rise, -1 a hollow, with four metres as the radius that counts.
+ *
+ * The map is looked at from most of the way overhead, where a slope has no
+ * silhouette and almost no lighting to give it away — a fold a third of a metre
+ * deep across four metres turns the surface by five degrees, which the sun
+ * barely registers. Shading by where the ground lies rather than by which way
+ * it faces is what makes a ditch, a bank or a roll of open country readable
+ * from up there at all, and readable ground is the tactical information.
+ */
+function lieOfLand(scene: SimScene, x: number, y: number, here: number): number {
+  const reach = 4;
+  const around = (
+    scene.terrain.heightAt(x + reach, y) + scene.terrain.heightAt(x - reach, y)
+    + scene.terrain.heightAt(x, y + reach) + scene.terrain.heightAt(x, y - reach)
+  ) / 4;
+  return Math.max(-1, Math.min(1, (here - around) / 0.4));
+}
+
+/** Ground that holds water, and ground the sun has had all summer. */
+const DAMP = new THREE.Color(0x55663d);
+const BLEACHED = new THREE.Color(0xa39469);
+/** How far one patch is allowed to drift toward either of them. */
+const WEATHERING = 0.32;
+
+/**
+ * Drift a patch of ground toward damp or toward burnt off.
+ *
+ * Brightness alone cannot do this. A field shaded lighter and darker in patches
+ * still reads as one painted colour under uneven light; a field that goes
+ * yellower where it drains and greener where it does not reads as a field.
+ *
+ * Two things decide it, and neither is enough alone. The lie of the land,
+ * because water runs downhill and the hollows stay green into a dry summer
+ * while the rises burn off first. And noise, because weathering also happens in
+ * patches that have nothing to do with the shape of the ground — take that away
+ * and the map turns into a contour diagram of itself.
+ */
+function weather(colour: THREE.Color, x: number, y: number, lie: number): void {
+  const damp = Math.max(0, Math.min(1,
+    0.5 - lie * 0.34 - (noiseAt(x + 53, y + 91, 31) - 0.5) * 0.9,
+  ));
+  colour.lerp(damp > 0.5 ? DAMP : BLEACHED, Math.abs(damp - 0.5) * 2 * WEATHERING);
+}
+
+/**
  * How much darker or lighter this patch of ground is than its surface's colour.
  *
- * Three things, none of which the lighting can supply. Coarse patchiness,
+ * Four things, none of which the lighting can supply. Coarse patchiness,
  * because a ploughed field is not one colour and a flat fill reads as painted
- * card. Slope, because ground that pitches has thinner cover on it and catches
- * the light differently from ground that lies flat. And a darkening in the
- * angle where something solid meets the earth — the cheapest possible ambient
- * occlusion, computed once at build time, and the thing that stops a building
- * looking like it was pasted on top of the map rather than standing on it.
+ * card. The lie of the land, so hollows sit in their own shade. Slope, because
+ * ground that pitches has thinner cover on it and catches the light differently
+ * from ground that lies flat. And a darkening in the angle where something
+ * solid meets the earth — the cheapest possible ambient occlusion, computed
+ * once at build time, and the thing that stops a building looking like it was
+ * pasted on top of the map rather than standing on it.
  */
-function groundShade(scene: SimScene, x: number, y: number): number {
-  const patch = 0.92 + noiseAt(x, y, 17) * 0.16;
-  const grain = 0.97 + noiseAt(x, y, 3.5) * 0.06;
+function groundShade(scene: SimScene, x: number, y: number, lie: number): number {
+  // Two octaves. One was a single size of blotch repeating across the whole
+  // map, which the eye finds as fast as it finds a grid.
+  const patch = 0.90 + noiseAt(x, y, 34) * 0.13 + noiseAt(x, y, 13) * 0.09;
+  // Shallower than it was: the photographed ground now covers this band, and
+  // two sources of the same frequency only fight.
+  const grain = 0.98 + noiseAt(x, y, 3.5) * 0.04;
+  const relief = 1 + lie * 0.11;
   const slope = 1 - Math.min(scene.terrain.slopeAt(x, y), 1) * 0.18;
 
   let contact = 1;
@@ -282,7 +343,7 @@ function groundShade(scene: SimScene, x: number, y: number): number {
     contact = Math.min(contact, 0.62 + 0.38 * Math.max(0, d / reach));
   }
 
-  return patch * grain * slope * contact;
+  return patch * grain * relief * slope * contact;
 }
 
 const scratch = new THREE.Color();
@@ -296,7 +357,7 @@ const scratch = new THREE.Color();
  */
 function writeTerrainVertex(
   scene: SimScene, i: number, j: number,
-  positions: Float32Array, colours: Float32Array, v: number,
+  positions: Float32Array, colours: Float32Array, ramp: Float32Array, v: number,
 ): void {
   const x = i * MESH_STEP - APRON;
   const y = j * MESH_STEP - APRON;
@@ -308,12 +369,25 @@ function writeTerrainVertex(
   const sy = Math.max(0, Math.min(scene.height, y));
   const out = Math.hypot(x - sx, y - sy);
 
+  // Sampled once and used three times. Reading the heightfield is the most
+  // expensive thing on this path — a crater rewrites all eighty-four thousand
+  // vertices — and this height is wanted for the position, for the lie of the
+  // land and for nothing else to have to ask again.
+  const height = scene.heightAt(sx, sy);
   positions[v * 3] = x;
-  positions[v * 3 + 1] = scene.heightAt(sx, sy) - (out / APRON) ** 2 * 7;
+  positions[v * 3 + 1] = height - (out / APRON) ** 2 * 7;
   positions[v * 3 + 2] = y;
 
-  scratch.set(SURFACE_COLOUR[scene.terrain.surfaceAt(sx, sy)] ?? 0x8b8275);
-  scratch.multiplyScalar(groundShade(scene, sx, sy));
+  const surface = scene.terrain.surfaceAt(sx, sy);
+  const lie = lieOfLand(scene, sx, sy, height);
+  ramp[v * 2] = GROUND_RAMP[surface] ?? 0.54;
+  // And how much of the photographed grain to let through. None of it out in
+  // the apron: that ground is haze, and texturing haze only draws the eye to
+  // the part of the picture that is admitting it is scenery.
+  ramp[v * 2 + 1] = out > 0 ? Math.max(0, 1 - (out / APRON) ** 0.6) : 1;
+  scratch.set(SURFACE_COLOUR[surface] ?? 0x8b8275);
+  weather(scratch, sx, sy, lie);
+  scratch.multiplyScalar(groundShade(scene, sx, sy, lie));
   // And it fades into the air, so there is no line where the level ends.
   if (out > 0) scratch.lerp(HAZE, Math.min(1, (out / APRON) ** 0.8));
   colours[v * 3] = scratch.r;
@@ -324,10 +398,11 @@ function writeTerrainVertex(
 function buildTerrainGeometry(scene: SimScene, cols: number, rows: number): THREE.BufferGeometry {
   const positions = new Float32Array(cols * rows * 3);
   const colours = new Float32Array(cols * rows * 3);
+  const ramp = new Float32Array(cols * rows * 2);
 
   let v = 0;
   for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) writeTerrainVertex(scene, i, j, positions, colours, v++);
+    for (let i = 0; i < cols; i++) writeTerrainVertex(scene, i, j, positions, colours, ramp, v++);
   }
 
   const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);
@@ -350,6 +425,7 @@ function buildTerrainGeometry(scene: SimScene, cols: number, rows: number): THRE
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  geometry.setAttribute('aGround', new THREE.BufferAttribute(ramp, 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
   return geometry;

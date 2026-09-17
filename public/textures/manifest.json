@@ -4,32 +4,92 @@
     {
       "name": "brick",
       "metres": 2.4,
-      "pack": "Old_Red_Brick"
+      "pack": "Old_Red_Brick",
+      "mean": [
+        0.3726,
+        0.1675,
+        0.1037
+      ]
     },
     {
       "name": "concrete",
       "metres": 3.2,
-      "pack": "Dirty_Concrete"
+      "pack": "Dirty_Concrete",
+      "mean": [
+        0.3633,
+        0.3124,
+        0.2759
+      ]
     },
     {
       "name": "timber",
       "metres": 2,
-      "pack": "Old_Wood"
+      "pack": "Old_Wood",
+      "mean": [
+        0.2431,
+        0.2257,
+        0.2234
+      ]
     },
     {
       "name": "metal",
       "metres": 2,
-      "pack": "Diamond_Plate"
+      "pack": "Diamond_Plate",
+      "mean": [
+        0.2418,
+        0.2327,
+        0.2238
+      ]
     },
     {
       "name": "tile",
       "metres": 1.6,
-      "pack": "Red_Tiles"
+      "pack": "Red_Tiles",
+      "mean": [
+        0.4453,
+        0.2803,
+        0.2529
+      ]
     },
     {
       "name": "shingle",
       "metres": 2.2,
-      "pack": "Wooden_Shingles"
+      "pack": "Wooden_Shingles",
+      "mean": [
+        0.1236,
+        0.1009,
+        0.0926
+      ]
+    },
+    {
+      "name": "grass",
+      "metres": 3.6,
+      "pack": "Dirty_Grass",
+      "mean": [
+        0.2574,
+        0.2854,
+        0.172
+      ]
+    },
+    {
+      "name": "earth",
+      "metres": 4.5,
+      "pack": "Soil_Shoeprints",
+      "mean": [
+        0.1709,
+        0.133,
+        0.1059
+      ]
+    },
+    {
+      "name": "stone",
+      "metres": 6,
+      "pack": "Cracked_Asphalt",
+      "mean": [
+        0.2685,
+        0.2576,
+        0.247
+      ]
     }
   ]
 }

@@ -46,6 +46,26 @@ const MATERIALS = [
   { name: 'metal', pack: 'Diamond_Plate', metres: 2.0 },
   { name: 'tile', pack: 'Red_Tiles', metres: 1.6 },
   { name: 'shingle', pack: 'Wooden_Shingles', metres: 2.2 },
+
+  /**
+   * The three the ground is made of, blended along a ramp from vegetated to
+   * metalled — see `GROUND_RAMP` in `src/render/world.ts`. They want to be
+   * larger than the wall materials: a wall is a hundred pixels across and a
+   * field is the whole screen, so a tile small enough to read on brick repeats
+   * fifty times across a paddock and the eye finds the grid instantly.
+   *
+   * Soil is the middle deliberately. Every pair of surfaces that meet blends
+   * through it, and a worn margin of bare earth between grass and concrete is
+   * what is actually there.
+   *
+   * Albedo only. The ground shader mixes three layers per fragment and takes
+   * no normal map, so fetching one is a hundred and eighty kilobytes nobody
+   * ever samples — and the grass pack has no normal in it at all, so relief
+   * would arrive on two thirds of the ramp and stop.
+   */
+  { name: 'grass', pack: 'Dirty_Grass', metres: 3.6, albedoOnly: true },
+  { name: 'earth', pack: 'Soil_Shoeprints', metres: 4.5, albedoOnly: true },
+  { name: 'stone', pack: 'Cracked_Asphalt', metres: 6.0, albedoOnly: true },
 ];
 
 /**
@@ -68,6 +88,34 @@ const MAPS = [
 ];
 
 /** Displacement, occlusion, specular, roughness and metalness are not. */
+
+/**
+ * The average colour of a tile, in the linear space the shader works in.
+ *
+ * The ground shader divides by this so a texture contributes its grain without
+ * moving the palette: dividing by the mean leaves a field of values centred on
+ * one, so grass photographed dark and soil photographed pale both come out as
+ * variation around whatever colour the surface is authored as. Take the mean
+ * of the sRGB bytes instead and every ground goes several percent dark, because
+ * the shader decodes before it multiplies and the decode is not linear.
+ */
+const TO_LINEAR = Array.from({ length: 256 }, (_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+});
+
+async function linearMean(jpeg) {
+  const { data, info } = await sharp(jpeg).raw().toBuffer({ resolveWithObject: true });
+  const n = info.channels;
+  const sum = [0, 0, 0];
+  for (let i = 0; i < data.length; i += n) {
+    sum[0] += TO_LINEAR[data[i]];
+    sum[1] += TO_LINEAR[data[i + 1]];
+    sum[2] += TO_LINEAR[data[i + 2]];
+  }
+  const pixels = data.length / n;
+  return sum.map((v) => Number((v / pixels).toFixed(4)));
+}
 
 async function fetchPack(pack, into) {
   const zip = path.join(into, `${pack}.zip`);
@@ -104,6 +152,7 @@ for (const material of MATERIALS) {
   const present = (await readdir(work)).filter((f) => /\.(png|jpe?g)$/i.test(f));
   const written = [];
   for (const map of MAPS) {
+    if (material.albedoOnly && map.role !== 'albedo') continue;
     // First pattern that matches anything wins, so a pack carrying both an
     // albedo and a diffuse gives up the albedo.
     const found = map.match.map((re) => present.find((f) => re.test(f))).find(Boolean);
@@ -118,13 +167,16 @@ for (const material of MATERIALS) {
       .jpeg({ quality: 82, mozjpeg: true })
       .toBuffer();
     await writeFile(to, out);
+    if (map.role === 'albedo') material.mean = await linearMean(out);
     written.push(`${map.role} ${(out.length / 1024).toFixed(0)}kB`);
   }
   if (written.length === 0) {
     console.log('SKIPPED — no usable maps in the pack');
     continue;
   }
-  manifest.push({ name: material.name, metres: material.metres, pack: material.pack });
+  manifest.push({
+    name: material.name, metres: material.metres, pack: material.pack, mean: material.mean,
+  });
   console.log(written.join('  '));
 }
 

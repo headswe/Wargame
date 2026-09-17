@@ -14,13 +14,23 @@ import * as THREE from 'three';
  * register their interest and are handed the map whenever it turns up.
  */
 
-export type MaterialName = 'brick' | 'concrete' | 'timber' | 'metal' | 'tile' | 'shingle';
+export type MaterialName =
+  | 'brick' | 'concrete' | 'timber' | 'metal' | 'tile' | 'shingle'
+  | 'grass' | 'earth' | 'stone';
 
 interface Loaded {
   albedo: THREE.Texture | null;
   normal: THREE.Texture | null;
   /** How many metres of wall or roof one tile of this texture covers. */
   metres: number;
+  /** The tile's average colour, linear. See `linearMean` in `tools/textures.mjs`. */
+  mean: [number, number, number];
+}
+
+interface ManifestEntry {
+  name: string;
+  metres: number;
+  mean?: [number, number, number];
 }
 
 const loaded = new Map<MaterialName, Loaded>();
@@ -64,6 +74,50 @@ function tiled(source: THREE.Texture, tiles: number): THREE.Texture {
   return copy;
 }
 
+/**
+ * One layer of ground, for a shader that mixes several of them itself.
+ *
+ * The wall and roof materials above take a texture and are done with it. The
+ * ground cannot: it is a single mesh carrying every surface on the map, so the
+ * blending happens per fragment and the caller needs the maps and the numbers
+ * rather than a material with one `map` on it.
+ */
+export interface GroundLayer {
+  map: THREE.Texture;
+  /** Average colour of the tile, so grain can be applied without moving the palette. */
+  mean: [number, number, number];
+  /** How many metres of ground one tile covers. */
+  metres: number;
+}
+
+/**
+ * Call `onReady` once every one of `names` has arrived, and never if any of
+ * them does not. Same bargain as `texture`: the ground already draws.
+ */
+export function ground(names: MaterialName[], onReady: (layers: GroundLayer[]) => void): void {
+  begin();
+  const layers: (GroundLayer | null)[] = names.map(() => null);
+  let left = names.length;
+  names.forEach((name, at) => {
+    const take = (maps: Loaded): void => {
+      if (!maps.albedo) return;
+      const map = maps.albedo.clone();
+      map.wrapS = THREE.RepeatWrapping;
+      map.wrapT = THREE.RepeatWrapping;
+      // The ground is seen at a shallow angle across a hundred and seventy
+      // metres, which is the case trilinear filtering is worst at: without
+      // this the far half of every field crawls. Clamped to what the card has.
+      map.anisotropy = 8;
+      map.needsUpdate = true;
+      layers[at] = { map, mean: maps.mean, metres: maps.metres };
+      if (--left === 0) onReady(layers as GroundLayer[]);
+    };
+    const have = loaded.get(name);
+    if (have) take(have);
+    else waiting.set(name, [...(waiting.get(name) ?? []), take]);
+  });
+}
+
 function begin(): void {
   if (started) return;
   started = true;
@@ -76,7 +130,7 @@ function begin(): void {
   // from as well as at the root — the same reason index.html's icon is.
   fetch('./textures/manifest.json')
     .then((r) => (r.ok ? r.json() : null))
-    .then(async (manifest: { materials: { name: string; metres: number }[] } | null) => {
+    .then(async (manifest: { materials: ManifestEntry[] } | null) => {
       if (!manifest) return;
       for (const entry of manifest.materials) {
         const [albedo, normal] = await Promise.all([
@@ -84,7 +138,9 @@ function begin(): void {
           one(`./textures/${entry.name}-normal.jpg`),
         ]);
         if (albedo) albedo.colorSpace = THREE.SRGBColorSpace;
-        const maps: Loaded = { albedo, normal, metres: entry.metres };
+        const maps: Loaded = {
+          albedo, normal, metres: entry.metres, mean: entry.mean ?? [1, 1, 1],
+        };
         loaded.set(entry.name as MaterialName, maps);
         for (const fn of waiting.get(entry.name as MaterialName) ?? []) fn(maps);
         waiting.delete(entry.name as MaterialName);

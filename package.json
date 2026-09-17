@@ -14,7 +14,8 @@
     "balance": "node --experimental-strip-types tools/balance.ts",
     "editor-check": "node tools/editor-check.mjs",
     "level-report": "node --experimental-strip-types tools/level-report.ts",
-    "textures": "node tools/textures.mjs"
+    "textures": "node tools/textures.mjs",
+    "ground-grain": "node tools/ground-grain.mjs"
   },
   "dependencies": {
     "@types/earcut": "^3.0.0",
