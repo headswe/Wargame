@@ -1,11 +1,30 @@
 import * as THREE from 'three';
-import { Faction, Posture, UnitState, type Unit } from '../sim/units.ts';
+import { Faction, UnitState, type Unit, eyeOf, silhouetteOf } from '../sim/units.ts';
+import { Stature } from '../sim/world/occlusion.ts';
 import type { Sim } from '../sim/sim.ts';
 import { THEME } from './theme.ts';
 
-const BODY_RADIUS = 0.2;
-const BODY_LENGTH = 0.52;
-const STAND_HEIGHT = BODY_RADIUS + BODY_LENGTH / 2 + 0.16;
+/**
+ * A man is the height the simulation says he is.
+ *
+ * He was not. The body was a capsule 0.92m tall standing 0.16m off the ground,
+ * so the top of his head came to 1.08m — while the simulation had him 1.78m,
+ * fired from his eye at 1.62m and sized every piece of cover against those
+ * numbers. Rounds left half a metre above the drawn head, which is how this was
+ * noticed, but the tracer was the symptom. The real cost is that you could not
+ * read cover off the screen: a 1.1m wall that the simulation says hides a
+ * crouching man was drawn taller than a standing one.
+ *
+ * The postures were separately wrong and in different directions — prone came
+ * out at 1.13 times the simulation's height, crouched at 0.70, standing at
+ * 0.61 — because they were three art constants rather than one reading of
+ * `silhouetteOf`.
+ *
+ * Shoulders are the one number here chosen by eye rather than taken from the
+ * simulation, which has no opinion about width.
+ */
+const SHOULDERS = 0.23;
+const BODY_LENGTH = Stature.standingTop - SHOULDERS * 2;
 /** Facing arc drawn under selected operators. Direction matters more than reach. */
 const CONE_RANGE = 12;
 /**
@@ -39,7 +58,7 @@ const SQUAD_COLOURS = [0x4fd2e0, 0xe0c14f, 0x9be04f];
 export class UnitViews {
   readonly group = new THREE.Group();
   private readonly views = new Map<number, UnitView>();
-  private readonly bodyGeometry = new THREE.CapsuleGeometry(BODY_RADIUS, BODY_LENGTH, 4, 10);
+  private readonly bodyGeometry = new THREE.CapsuleGeometry(SHOULDERS, BODY_LENGTH, 4, 10);
   private readonly muzzleGeometry = new THREE.BoxGeometry(0.5, 0.07, 0.07);
   private readonly ringGeometry: THREE.RingGeometry;
   private readonly barGeometry: THREE.PlaneGeometry;
@@ -69,14 +88,17 @@ export class UnitViews {
     });
     const body = new THREE.Mesh(this.bodyGeometry, bodyMaterial);
     body.castShadow = true;
-    body.position.y = STAND_HEIGHT;
+    body.position.y = Stature.standingTop / 2;
     root.add(body);
 
     const muzzle = new THREE.Mesh(
       this.muzzleGeometry,
       new THREE.MeshLambertMaterial({ color: 0x3a3632 }),
     );
-    muzzle.position.set(0.3, STAND_HEIGHT + 0.06, 0);
+    // At the eye, because that is where the simulation fires from: a rifle in
+    // the shoulder puts the bore a few centimetres under the aiming eye, and
+    // the tracer wants to leave the weapon it is drawn beside.
+    muzzle.position.set(0.3, Stature.standingEye, 0);
     root.add(muzzle);
 
     let xray: THREE.Mesh | null = null;
@@ -90,7 +112,7 @@ export class UnitViews {
         depthWrite: false,
       });
       xray = new THREE.Mesh(this.bodyGeometry, xrayMaterial);
-      xray.position.y = STAND_HEIGHT;
+      xray.position.y = Stature.standingTop / 2;
       xray.renderOrder = 900;
       root.add(xray);
     }
@@ -118,7 +140,9 @@ export class UnitViews {
     root.add(cone);
 
     const bars = new THREE.Group();
-    bars.position.y = STAND_HEIGHT + 0.62;
+    // Clear of a standing head, and stationary: bars that rise and fall with
+    // posture are harder to read than bars that stay put.
+    bars.position.y = Stature.standingTop + 0.3;
     const health = new THREE.Mesh(
       this.barGeometry,
       new THREE.MeshBasicMaterial({ color: 0x6fd08a, depthTest: false, transparent: true }),
@@ -187,36 +211,41 @@ export class UnitViews {
 
   private applyPosture(view: UnitView, unit: Unit): void {
     if (unit.state !== UnitState.Active) {
-      // Down and dead lie flat. A silhouette on the ground is unmistakable.
+      // Down and dead lie flat. A silhouette on the ground is unmistakable —
+      // full length, whatever posture he was caught in, because the squash is
+      // along the body once it is on its side.
       view.body.rotation.z = Math.PI / 2;
-      view.body.position.y = BODY_RADIUS;
+      view.body.scale.y = 1;
+      view.body.position.y = SHOULDERS;
       view.muzzle.visible = false;
       if (view.xray) {
         view.xray.rotation.z = Math.PI / 2;
-        view.xray.position.y = BODY_RADIUS;
+        view.xray.scale.y = 1;
+        view.xray.position.y = SHOULDERS;
       }
       return;
     }
 
     // The player has to be able to read posture at a glance, because it is now
     // the difference between a man who is hard to hit and one who is not.
-    let crouch = 1;
-    if (unit.posture === Posture.Pinned) crouch = 0.42;
-    else if (unit.posture === Posture.Prone) crouch = 0.5;
-    else if (unit.posture === Posture.Crouched) crouch = 0.76;
+    // Straight off `silhouetteOf`, so what you see him hide behind is what the
+    // simulation lets him hide behind. It moves continuously with exposure as
+    // well, so a man easing up to fire grows rather than snapping between
+    // three heights.
+    const crouch = silhouetteOf(unit) / Stature.standingTop;
 
     view.body.rotation.z = 0;
     view.body.scale.y = crouch;
-    view.body.position.y = STAND_HEIGHT * crouch;
+    view.body.position.y = (Stature.standingTop / 2) * crouch;
     view.muzzle.visible = true;
-    view.muzzle.position.y = STAND_HEIGHT * crouch + 0.06;
+    view.muzzle.position.y = eyeOf(unit);
     // Weapon comes down when sprinting; that delay is a real cost in the sim,
     // so it should be visible before it bites.
     view.muzzle.rotation.z = (1 - unit.weaponReady) * 0.9;
     if (view.xray) {
       view.xray.rotation.z = 0;
       view.xray.scale.y = crouch;
-      view.xray.position.y = STAND_HEIGHT * crouch;
+      view.xray.position.y = (Stature.standingTop / 2) * crouch;
     }
   }
 
