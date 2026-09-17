@@ -84,6 +84,8 @@ function tiled(source: THREE.Texture, tiles: number): THREE.Texture {
  */
 export interface GroundLayer {
   map: THREE.Texture;
+  /** Relief, if the pack had one or one could be derived from its height map. */
+  normal: THREE.Texture | null;
   /** Average colour of the tile, so grain can be applied without moving the palette. */
   mean: [number, number, number];
   /** How many metres of ground one tile covers. */
@@ -101,15 +103,23 @@ export function ground(names: MaterialName[], onReady: (layers: GroundLayer[]) =
   names.forEach((name, at) => {
     const take = (maps: Loaded): void => {
       if (!maps.albedo) return;
-      const map = maps.albedo.clone();
-      map.wrapS = THREE.RepeatWrapping;
-      map.wrapT = THREE.RepeatWrapping;
       // The ground is seen at a shallow angle across a hundred and seventy
       // metres, which is the case trilinear filtering is worst at: without
-      // this the far half of every field crawls. Clamped to what the card has.
-      map.anisotropy = 8;
-      map.needsUpdate = true;
-      layers[at] = { map, mean: maps.mean, metres: maps.metres };
+      // anisotropy the far half of every field crawls. Clamped to the card's.
+      const tiling = (source: THREE.Texture): THREE.Texture => {
+        const copy = source.clone();
+        copy.wrapS = THREE.RepeatWrapping;
+        copy.wrapT = THREE.RepeatWrapping;
+        copy.anisotropy = 8;
+        copy.needsUpdate = true;
+        return copy;
+      };
+      layers[at] = {
+        map: tiling(maps.albedo),
+        normal: maps.normal ? tiling(maps.normal) : null,
+        mean: maps.mean,
+        metres: maps.metres,
+      };
       if (--left === 0) onReady(layers as GroundLayer[]);
     };
     const have = loaded.get(name);

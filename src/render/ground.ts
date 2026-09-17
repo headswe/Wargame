@@ -36,6 +36,8 @@ BLANK.needsUpdate = true;
 
 /** How much of the photographed variation reaches the screen, at full strength. */
 const GRAIN = 0.85;
+/** How far the relief is allowed to tilt the ground away from the surface. */
+const RELIEF = 0.7;
 
 /**
  * Put real ground under the vertex colours.
@@ -67,6 +69,10 @@ export function grainOnGround(material: THREE.MeshLambertMaterial): void {
     ] },
     groundTile: { value: new THREE.Vector3(1, 1, 1) },
     groundGrain: { value: 0 },
+    groundReliefA: { value: BLANK as THREE.Texture },
+    groundReliefB: { value: BLANK as THREE.Texture },
+    groundReliefC: { value: BLANK as THREE.Texture },
+    groundRelief: { value: 0 },
   };
 
   material.onBeforeCompile = (shader) => {
@@ -99,8 +105,39 @@ export function grainOnGround(material: THREE.MeshLambertMaterial): void {
          uniform vec3 groundMean[3];
          uniform vec3 groundTile;
          uniform float groundGrain;
+         uniform sampler2D groundReliefA;
+         uniform sampler2D groundReliefB;
+         uniform sampler2D groundReliefC;
+         uniform float groundRelief;
          varying vec2 vGround;
          varying vec2 vGroundXz;`,
+      )
+      .replace(
+        // Nothing when the material has no normalMap, which it has not: three
+        // only compiles its own tangent frame under USE_NORMALMAP, and this
+        // mixes three maps per fragment rather than binding one.
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+         vec3 reliefA = texture2D(groundReliefA, vGroundXz / groundTile.x).xyz * 2.0 - 1.0;
+         vec3 reliefB = texture2D(groundReliefB, vGroundXz / groundTile.y).xyz * 2.0 - 1.0;
+         vec3 reliefC = texture2D(groundReliefC, vGroundXz / groundTile.z).xyz * 2.0 - 1.0;
+         float reliefRamp = clamp(vGround.x, 0.0, 1.0);
+         vec3 relief = mix(
+           mix(reliefA, reliefB, smoothstep(0.0, 0.5, reliefRamp)),
+           reliefC,
+           smoothstep(0.5, 1.0, reliefRamp)
+         );
+         relief.xy *= groundRelief * vGround.y;
+         // The ground's texture coordinate is the world plane in metres, so its
+         // tangent frame is world +X and world +Z carried into view space. No
+         // tangent attribute, and no screen-space derivatives either — the
+         // frame is known exactly rather than recovered from the triangle.
+         vec3 groundTangent = (viewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz;
+         groundTangent = normalize(groundTangent - normal * dot(normal, groundTangent));
+         vec3 groundBitangent = cross(groundTangent, normal);
+         normal = normalize(
+           groundTangent * relief.x + groundBitangent * relief.y + normal * relief.z
+         );`,
       )
       .replace(
         '#include <color_fragment>',
@@ -127,5 +164,13 @@ export function grainOnGround(material: THREE.MeshLambertMaterial): void {
     layers.forEach((layer, at) => uniforms.groundMean.value[at].fromArray(layer.mean));
     uniforms.groundTile.value.set(a.metres, b.metres, c.metres);
     uniforms.groundGrain.value = GRAIN;
+    // All three or none. Relief on two of the layers and flat on the third
+    // reads as a bug in the ground rather than as two kinds of ground.
+    if (a.normal && b.normal && c.normal) {
+      uniforms.groundReliefA.value = a.normal;
+      uniforms.groundReliefB.value = b.normal;
+      uniforms.groundReliefC.value = c.normal;
+      uniforms.groundRelief.value = RELIEF;
+    }
   });
 }

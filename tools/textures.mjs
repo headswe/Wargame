@@ -58,14 +58,14 @@ const MATERIALS = [
    * through it, and a worn margin of bare earth between grass and concrete is
    * what is actually there.
    *
-   * Albedo only. The ground shader mixes three layers per fragment and takes
-   * no normal map, so fetching one is a hundred and eighty kilobytes nobody
-   * ever samples — and the grass pack has no normal in it at all, so relief
-   * would arrive on two thirds of the ramp and stop.
+   * The grass pack ships no normal map, only a displacement, which is why the
+   * ground went in flat to begin with — relief on two thirds of the ramp and
+   * nothing on the rest is worse than none. A normal map is the gradient of a
+   * height map, so it is derived below rather than gone without.
    */
-  { name: 'grass', pack: 'Dirty_Grass', metres: 3.6, albedoOnly: true },
-  { name: 'earth', pack: 'Soil_Shoeprints', metres: 4.5, albedoOnly: true },
-  { name: 'stone', pack: 'Cracked_Asphalt', metres: 6.0, albedoOnly: true },
+  { name: 'grass', pack: 'Dirty_Grass', metres: 3.6 },
+  { name: 'earth', pack: 'Soil_Shoeprints', metres: 4.5 },
+  { name: 'stone', pack: 'Cracked_Asphalt', metres: 6.0 },
 ];
 
 /**
@@ -117,6 +117,59 @@ async function linearMean(jpeg) {
   return sum.map((v) => Number((v / pixels).toFixed(4)));
 }
 
+/** Displacement under whichever of its several names this pack chose. */
+const HEIGHT = [/_DISP\.(png|jpe?g)$/i, /_HEIGHT\.(png|jpe?g)$/i];
+
+/**
+ * A normal map is the gradient of a height map, so a pack that ships only a
+ * displacement is not a pack without relief in it.
+ *
+ * Sobel, wrapped at the edges so the result tiles as seamlessly as the height
+ * map it came from — sampling clamped instead puts a visible seam every few
+ * metres across a whole field, which is exactly the distance at which the eye
+ * finds a grid.
+ *
+ * `STEEPNESS` is how many normal-map units one unit of height is worth. It is a
+ * look, not a measurement: the displacement is in no particular units and the
+ * packs do not agree with each other about its range.
+ */
+const STEEPNESS = 4;
+
+async function normalFromHeight(file) {
+  const { data, info } = await sharp(file)
+    .greyscale().resize(SIZE, SIZE, { fit: 'fill' })
+    .raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const at = (x, y) => data[((y + height) % height) * width + ((x + width) % width)] / 255;
+
+  const out = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dx = (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1))
+        - (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
+      const dy = (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1))
+        - (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
+      const nx = -dx * STEEPNESS;
+      // Green is the gradient along +v, and +v is *up* the image, because
+      // three uploads textures flipped. Take the raw row order for it and the
+      // relief comes out inside out — every bump lit as a dent, which from
+      // overhead mostly reads as the ground going strangely flat rather than
+      // as anything obviously wrong. Not argued: derived from
+      // `Soil_Shoeprints`, which ships a height map and an authored normal
+      // map both, the green channel correlates with the authored one at
+      // r = +0.843 this way round and r = -0.843 the other.
+      const ny = dy * STEEPNESS;
+      const length = Math.hypot(nx, ny, 1);
+      const i = (y * width + x) * 3;
+      out[i] = Math.round((nx / length * 0.5 + 0.5) * 255);
+      out[i + 1] = Math.round((ny / length * 0.5 + 0.5) * 255);
+      out[i + 2] = Math.round((1 / length * 0.5 + 0.5) * 255);
+    }
+  }
+  return sharp(out, { raw: { width, height, channels: 3 } })
+    .jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+}
+
 async function fetchPack(pack, into) {
   const zip = path.join(into, `${pack}.zip`);
   const response = await fetch(`${SOURCE}/${pack}.zip`);
@@ -152,7 +205,6 @@ for (const material of MATERIALS) {
   const present = (await readdir(work)).filter((f) => /\.(png|jpe?g)$/i.test(f));
   const written = [];
   for (const map of MAPS) {
-    if (material.albedoOnly && map.role !== 'albedo') continue;
     // First pattern that matches anything wins, so a pack carrying both an
     // albedo and a diffuse gives up the albedo.
     const found = map.match.map((re) => present.find((f) => re.test(f))).find(Boolean);
@@ -170,6 +222,17 @@ for (const material of MATERIALS) {
     if (map.role === 'albedo') material.mean = await linearMean(out);
     written.push(`${map.role} ${(out.length / 1024).toFixed(0)}kB`);
   }
+  // Last resort for the normal, and only then: a real one carries detail a
+  // height map cannot, so a derived one is never preferred over a shipped one.
+  if (!written.some((w) => w.startsWith('normal'))) {
+    const found = HEIGHT.map((re) => present.find((f) => re.test(f))).find(Boolean);
+    if (found) {
+      const out = await normalFromHeight(path.join(work, found));
+      await writeFile(path.join(OUT, `${material.name}-normal.jpg`), out);
+      written.push(`normal ${(out.length / 1024).toFixed(0)}kB (from ${found.replace(/.*_/, '')})`);
+    }
+  }
+
   if (written.length === 0) {
     console.log('SKIPPED — no usable maps in the pack');
     continue;
