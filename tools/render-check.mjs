@@ -33,7 +33,10 @@ import { chromium } from 'playwright';
 
 /** What each shipped map is made of. A fixture: levels differ, and a level
  *  with no roads in it must not be reported as a renderer that lost the road
- *  view. `markers` is not here — nothing is selected in a spectate. */
+ *  view. `markers` is not here — nothing is selected in a spectate, and neither
+ *  is `effects`: a tracer lives seventy-five milliseconds, so whether anything
+ *  is in flight at the instant of the reading is luck, and a check that fails
+ *  by luck is worse than no check. */
 const EXPECTED = {
   stepove: {
     plan: 'bounding',

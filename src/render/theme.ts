@@ -20,6 +20,16 @@ export const THEME = {
   impact: 0xd8cdb4,
   blood: 0xc0392b,
 
+  /** What a firefight throws into the air. All of these are drawn additively,
+   *  so they read as brightness over whatever is behind them rather than as
+   *  paint: a dust colour here is what the sun makes of the dust, not the dust. */
+  muzzleFlash: 0xffd9a0,
+  ricochet: 0xffe08a,
+  dust: 0x3f3a31,
+  fireball: 0xffa63c,
+  ember: 0xff7326,
+  smoke: 0x4a463f,
+
   objective: 0xf2c14e,
   coverPip: 0x5ad6b0,
   coverPipWeak: 0xd6b45a,
