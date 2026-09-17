@@ -14,8 +14,9 @@ npm run typecheck     # tsc --noEmit (also runs as part of build)
 npm run build         # typecheck + vite build
 npm run balance       # scripted assaults, measured — see "Measure before you argue"
 npm run level-report  # ground analysis for every shipped level
-npm run playtest      # drives the real game in a browser   } all three need
+npm run playtest      # drives the real game in a browser   } all four need
 npm run editor-check  # drives the level editor in a browser } `npm run dev` up
+npm run render-check  # does every view reach the screen     }
 npm run ground-grain  # how broken up the drawn ground is    }
 ```
 
@@ -115,6 +116,19 @@ over shipped and player-built levels alike; `test/level.test.ts` holds the
 shipped ones to zero problems and the editor refuses to publish on an error.
 Add level rules here, not as a test hardcoded against one map.
 
+There is one thing in rendering that *is* worth asserting, and `npm run
+render-check` is it: not how a thing looks, but whether it is drawn at all. It
+hides each named view, draws again and counts the pixels that changed. A road
+wound inside out, a shader that failed to compile because the fog patch went on
+twice, roof triangles facing the floor — all of those left the scene graph, the
+vertex counts and the bounding boxes looking perfectly healthy, and all of them
+were found by somebody happening to look. **Do not reach for a reference image
+instead.** One has to be re-blessed every time anything is restyled on purpose,
+and when it fails it says "pixels changed" and names no subsystem — the exact
+failure that got `test/tactics.test.ts` deleted. A floor of two hundredths of a
+percent survives any restyling and still catches a view that has stopped
+drawing.
+
 **3. Gameplay and looks — measure and report, never assert.** `npm run balance`
 and `npm run ground-grain`. They are instruments, not scoreboards. They have no
 pass and no fail on purpose: the number means nothing on its own, and everything
@@ -191,8 +205,10 @@ Deliberate debt gets a comment saying it is deliberate and why (see the
 ## Verifying
 
 `npm test` and `npm run build` are the floor. Anything touching rendering, the
-editor or input also needs a browser run — `npm run playtest` or `npm run
-editor-check` with `npm run dev` up — because the failures that matter there
+editor or input also needs a browser run with `npm run dev` up — `npm run
+playtest`, `npm run editor-check`, and `npm run render-check` for anything that
+adds, patches or reshapes a material or a mesh. The failures that matter there
 (an opening bricked up, a slot with no field of fire, a cursor that will not
-place a man along a wall) are invisible to the headless tests and were all
-found by looking.
+place a man along a wall, a mesh that draws nothing while casting a shadow) are
+invisible to the headless tests, and every one of them was found by looking
+before there was anything that would catch it.

@@ -15,7 +15,8 @@
     "editor-check": "node tools/editor-check.mjs",
     "level-report": "node --experimental-strip-types tools/level-report.ts",
     "textures": "node tools/textures.mjs",
-    "ground-grain": "node tools/ground-grain.mjs"
+    "ground-grain": "node tools/ground-grain.mjs",
+    "render-check": "node tools/render-check.mjs"
   },
   "dependencies": {
     "@types/earcut": "^3.0.0",

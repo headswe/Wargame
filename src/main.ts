@@ -485,6 +485,7 @@ declare global {
       lookAt(x: number, y: number): void;
       tryThrow(squadId: number, kind: number, x: number, y: number): boolean;
       ordnance(): { kind: number; landed: boolean; fuse: number }[];
+      coverage(): Record<string, number>;
     };
   }
 }
@@ -508,6 +509,62 @@ window.wargame = {
     return running().sim.live.map((o) => ({
       kind: o.kind, landed: o.landed, fuse: Number(o.fuse.toFixed(2)),
     }));
+  },
+  /**
+   * What fraction of the screen each named part of the world actually draws.
+   *
+   * Hide one, draw again, count the pixels that changed. It is deliberately not
+   * a picture to compare against: a reference image has to be re-blessed every
+   * time anything is restyled on purpose, and when it does fail it says
+   * "pixels changed" and names no subsystem. This asks the one question this
+   * renderer keeps getting wrong — is the thing on screen at all — and its
+   * answer names exactly which view is missing.
+   *
+   * Shadows are off for the measurement, and that is the point rather than an
+   * optimisation. The road ribbon once spent an entire session invisible in the
+   * game while still casting a shadow, because the fog patch had been applied
+   * to its material twice and the shader did not compile. Counted with shadows
+   * on, that road covers a healthy slice of the screen and the bug sails
+   * through.
+   */
+  coverage() {
+    const canvasWidth = renderer.domElement.width;
+    const canvasHeight = renderer.domElement.height;
+    const gl = renderer.getContext();
+    const shadows = renderer.shadowMap.enabled;
+    renderer.shadowMap.enabled = false;
+
+    const draw = (): Uint8Array => {
+      renderer.render(scene, iso.camera);
+      const pixels = new Uint8Array(canvasWidth * canvasHeight * 4);
+      gl.readPixels(0, 0, canvasWidth, canvasHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return pixels;
+    };
+
+    const parts: THREE.Object3D[] = [];
+    const wanted = new Set([
+      'terrain', 'roads', 'walls', 'roofs', 'props', 'foliage', 'units', 'markers',
+    ]);
+    scene.traverse((object) => {
+      if (wanted.has(object.name)) parts.push(object);
+    });
+
+    const whole = draw();
+    const covered: Record<string, number> = {};
+    for (const part of parts) {
+      part.visible = false;
+      const without = draw();
+      part.visible = true;
+      let changed = 0;
+      for (let i = 0; i < whole.length; i += 4) {
+        if (whole[i] !== without[i] || whole[i + 1] !== without[i + 1]
+          || whole[i + 2] !== without[i + 2]) changed++;
+      }
+      covered[part.name] = Number((changed / (canvasWidth * canvasHeight)).toFixed(4));
+    }
+
+    renderer.shadowMap.enabled = shadows;
+    return covered;
   },
   snapshot() {
     const sim = running().sim;

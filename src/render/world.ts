@@ -118,6 +118,7 @@ export class WorldView {
     );
     this.props.castShadow = true;
     this.props.count = solidProps.length;
+    this.props.name = 'props';
     this.group.add(this.props);
 
     // Vegetation reads better as a soft blob than a hard cylinder, and being
@@ -132,6 +133,7 @@ export class WorldView {
     );
     this.foliage.castShadow = true;
     this.foliage.count = softProps.length;
+    this.foliage.name = 'foliage';
     this.group.add(this.foliage);
 
     solidProps.forEach((p, slot) => {
