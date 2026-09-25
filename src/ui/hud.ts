@@ -26,6 +26,13 @@ export class Hud {
   private readonly statusRoot: HTMLElement;
   private readonly endRoot: HTMLElement;
   private elapsed = 0;
+  /**
+   * What each panel was last given, so a frame that changes nothing writes
+   * nothing. Rebuilding four panels' markup sixty times a second is layout
+   * work for no pixels, and it replaced every element under the pointer so
+   * often that the nerve bar's tooltip could never appear.
+   */
+  private readonly written = new WeakMap<HTMLElement, string>();
 
   constructor(
     root: HTMLElement,
@@ -37,8 +44,8 @@ export class Hud {
     root.innerHTML = `
       <div id="top">
         <div id="mission" class="panel">
-          <h1>${level.name}</h1>
-          <p>${level.brief}</p>
+          <h1>${escape(level.name)}</h1>
+          <p>${escape(level.brief)}</p>
         </div>
         <div id="status" class="panel"></div>
       </div>
@@ -107,12 +114,12 @@ export class Hud {
     const minutes = Math.floor(sim.time / 60);
     const seconds = Math.floor(sim.time % 60);
 
-    this.statusRoot.innerHTML = `
+    this.write(this.statusRoot, `
       <div class="row"><span class="label">Operators</span><span>${standing}/${players.length}</span></div>
       <div class="row"><span class="label">Down / KIA</span><span>${down} / ${kia}</span></div>
       <div class="row"><span class="label">Hostiles</span><span>${hostiles}</span></div>
       <div class="row"><span class="label">Elapsed</span><span>${minutes}:${String(seconds).padStart(2, '0')}</span></div>
-    `;
+    `);
   }
 
   private renderTeam(element: HTMLElement, sim: Sim, squad: Squad, selected: boolean): void {
@@ -163,7 +170,7 @@ export class Hud {
     const frags = active.reduce((n, u) => n + u.frags, 0);
     const smokes = active.reduce((n, u) => n + u.smokes, 0);
 
-    element.innerHTML = `
+    this.write(element, `
       <header>
         <span class="name">${squad.name}</span>
         <span class="state ${stateClass}">${state}</span>
@@ -176,7 +183,7 @@ export class Hud {
         <span class="${frags === 0 ? 'empty' : ''}">FRAG &times;${frags}</span>
         <span class="${smokes === 0 ? 'empty' : ''}">SMOKE &times;${smokes}</span>
       </div>
-    `;
+    `);
   }
 
   private renderOperator(u: Unit): string {
@@ -216,11 +223,17 @@ export class Hud {
         <span class="who"><span>${u.name}</span><span class="role">${ROLE_SHORT[u.role] ?? ''}</span></span>
         <span class="tag ${tagClass}">${tag}</span>
         <span class="bars">
-          <span class="bar hp"><i style="width:${(u.hp / u.maxHp) * 100}%"></i></span>
-          <span class="bar sup"><i style="width:${u.suppression * 100}%"></i></span>
+          <span class="bar hp"><i style="width:${Math.round((u.hp / u.maxHp) * 100)}%"></i></span>
+          <span class="bar sup"><i style="width:${Math.round(u.suppression * 100)}%"></i></span>
         </span>
       </div>
     `;
+  }
+
+  private write(element: HTMLElement, html: string): void {
+    if (this.written.get(element) === html) return;
+    this.written.set(element, html);
+    element.innerHTML = html;
   }
 
   private renderAlerts(): void {
@@ -248,4 +261,9 @@ export class Hud {
         (kia.length ? `${kia.map((u) => u.name).join(', ')} did not.` : 'Nobody left behind.')
       : 'The contract is a write-off.';
   }
+}
+
+/** A level's name and brief are whatever its author typed, and may be markup. */
+function escape(text: string): string {
+  return text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] ?? c));
 }
