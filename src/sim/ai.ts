@@ -608,7 +608,7 @@ function updateHostileInitiative(ctx: SimContext, u: Unit): void {
  * A man who breaks cover and is missed has still been beaten.
  */
 function avoidBlast(ctx: SimContext, u: Unit): boolean {
-  const danger = dangerFrom(ctx.live, u.faction);
+  const danger = dangerFrom(ctx.live, u.faction, u.pos);
   if (!danger) {
     // Nothing live any more: drop back to the tempo the order asked for, or a
     // man blown out of his position would spend the rest of the fight running
