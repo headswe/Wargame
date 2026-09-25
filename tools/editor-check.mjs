@@ -144,6 +144,22 @@ await page.waitForTimeout(500);
 const walled = await state();
 check('a wall takes two clicks', walled.structures === redone.structures + 1);
 
+// --- two obstacles, each sized by its own drag. New operations used to have no
+// id until the next undo, so the second drag found the first obstacle by its
+// missing id and resized that one instead, and nothing just placed could be
+// selected.
+await page.keyboard.press('o');
+await dragWorld(110, 100, 113, 100);
+await dragWorld(128, 100, 131, 100);
+const placed = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const [first, second] = doc.data.structures.slice(-2);
+  return { first: first.radius, second: second.radius, selected: doc.selection.ops[0] === second.id };
+});
+check('each obstacle is sized by its own drag, and is the one selected',
+  Math.abs(placed.first - 3) < 0.3 && Math.abs(placed.second - 3) < 0.3 && placed.selected,
+  `radii ${placed.first.toFixed(1)}, ${placed.second.toFixed(1)}, selected: ${placed.selected}`);
+
 // --- the analysis overlay
 await page.selectOption('#overlay', 'fire');
 await page.waitForTimeout(2500);

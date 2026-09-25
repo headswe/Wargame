@@ -1,4 +1,4 @@
-import type { StructureOp, TerrainOp } from '../sim/world/level-data.ts';
+import { type StructureOp, TERRAIN_OPS, type TerrainOp } from '../sim/world/level-data.ts';
 import type { AnyOp, EditorDoc } from './document.ts';
 import { centreOf, rotate, translate } from './shapes.ts';
 
@@ -71,9 +71,13 @@ export function clipboardSize(): number {
   }
 }
 
-const TERRAIN = new Set([
-  'heightmap', 'rolling', 'mound', 'bank', 'cut', 'road', 'paint', 'crater',
-]);
+/**
+ * The level format's own list, not a copy of it. The copy that used to live
+ * here had fallen behind by one — `surfacemap`, the op the paint brush makes —
+ * so pasting painted ground filed it among the structures, and a level that
+ * cannot be built took the editor's rebuild down with it.
+ */
+const TERRAIN = TERRAIN_OPS;
 
 // ------------------------------------------------------------------ prefabs
 

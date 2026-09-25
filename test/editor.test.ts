@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { EditorDoc } from '../src/editor/document.ts';
-import { type StructureOp, blankLevel } from '../src/sim/world/level-data.ts';
+import { type StructureOp, blankLevel, packRuns } from '../src/sim/world/level-data.ts';
 import { Fabric } from '../src/sim/world/geometry.ts';
 
 function withWall(): { doc: EditorDoc; wall: StructureOp & { op: 'wall' } } {
@@ -61,4 +61,41 @@ test('undoing a spawn forgets it was selected', () => {
   doc.select([], { kind: 'enemy', team: 0, index: before });
   doc.undo();
   assert.equal(doc.selection.spawn, null);
+});
+
+test('something just added can be found by its id straight away', () => {
+  // A level that carries ids from whichever session wrote it, as every saved
+  // level does, so a fresh counter would start by repeating them.
+  const level = blankLevel();
+  level.terrain.forEach((op, i) => { op.id = `op${i + 1}`; });
+  const doc = new EditorDoc(level);
+  const made: StructureOp[] = [];
+  for (const x of [20, 40]) {
+    const op: StructureOp = { op: 'obstacle', at: { x, y: 50 }, radius: 1, top: 1, fabric: Fabric.Concrete };
+    doc.edit('add obstacle', () => doc.data.structures.push(op));
+    made.push(op);
+  }
+  assert.ok(made.every((op) => op.id), 'a new operation came out of the edit without an id');
+  assert.equal(doc.find(made[1].id!), made[1], 'looking up the second found something else');
+  const ids = doc.allOps().map((op) => op.id);
+  assert.equal(new Set(ids).size, ids.length, `ids repeat: ${ids.join(', ')}`);
+});
+
+test('pasting painted ground files it as ground', async () => {
+  const store = new Map<string, string>();
+  (globalThis as unknown as { localStorage: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { store.set(k, v); },
+    removeItem: (k: string) => { store.delete(k); },
+  };
+  const { copy, paste } = await import('../src/editor/clipboard.ts');
+  const doc = new EditorDoc(blankLevel());
+  doc.edit('paint ground', () => doc.data.terrain.push({
+    op: 'surfacemap', name: 'painted', cols: 2, rows: 2, runs: packRuns(new Uint8Array(4).fill(255)),
+  }));
+  doc.select(doc.data.terrain.filter((op) => op.op === 'surfacemap').map((op) => op.id!));
+  assert.equal(copy(doc), 1);
+  paste(doc, { x: 60, y: 60 });
+  assert.equal(doc.data.structures.length, 0, 'painted ground was pasted among the structures');
+  assert.equal(doc.data.terrain.filter((op) => op.op === 'surfacemap').length, 2);
 });

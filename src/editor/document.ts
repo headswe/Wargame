@@ -96,6 +96,12 @@ export class EditorDoc {
     } finally {
       this.depth--;
       if (this.depth === 0) {
+        // Whatever was just added gets its handle now, before the tool that
+        // added it goes looking for it. Without this a new operation had no id
+        // until the next undo or reload: nothing could select what was just
+        // drawn, and finding it by its missing id found the first other op
+        // with no id — so dragging out a second obstacle resized the first.
+        assignIds(this.data);
         const now = JSON.stringify(this.data);
         if (now !== this.committed) {
           this.past.push({ state: this.committed, label });
