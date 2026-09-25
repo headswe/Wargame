@@ -368,6 +368,10 @@ class Mission {
         this.effects.ingest(this.sim.effects, (x, y) => this.sim.isVisible(x, y));
         this.accumulator -= TICK;
         ticks++;
+        // A finished mission stops stepping, and stops clearing its effects
+        // with it, so the steps left in this frame would each ingest the last
+        // one's shots and blasts again.
+        if (this.sim.missionState !== MissionState.InProgress) break;
       }
       if (ticks === MAX_TICKS_PER_FRAME) this.accumulator = 0;
     }
