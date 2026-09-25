@@ -822,12 +822,18 @@ function publish(): void {
 const loadSelect = document.getElementById('load') as HTMLSelectElement;
 
 function refreshLoadList(): void {
-  const shipped = LEVEL_DATA.map((l) => `<option value="${l.id}">${escape(l.name)}</option>`);
-  const mine = savedLevels().map((l) => `<option value="${l.id}">${escape(l.name)}</option>`);
-  loadSelect.innerHTML =
-    '<option value="">\u2014</option>' +
-    `<optgroup label="Shipped">${shipped.join('')}</optgroup>` +
-    (mine.length > 0 ? `<optgroup label="Yours">${mine.join('')}</optgroup>` : '');
+  // Built as elements rather than markup. An id is only slugified when a level
+  // is named on publishing, so one that arrived in a file is whatever the file
+  // said — and `escape` does not cover the quote that ends an attribute.
+  const group = (label: string, levels: { id: string; name: string }[]): HTMLOptGroupElement => {
+    const el = document.createElement('optgroup');
+    el.label = label;
+    for (const l of levels) el.append(new Option(l.name, l.id));
+    return el;
+  };
+  const mine = savedLevels();
+  loadSelect.replaceChildren(new Option('\u2014', ''), group('Shipped', LEVEL_DATA));
+  if (mine.length > 0) loadSelect.append(group('Yours', mine));
   loadSelect.value = '';
 }
 

@@ -341,6 +341,11 @@ export function migrate(raw: unknown): LevelData {
   // Format 0 is anything written before levels carried a version at all: the
   // shape is already right, it simply never said so.
   data.version = LEVEL_FORMAT;
+  // Everything that shows a level — the picker, the editor, the HUD — treats
+  // these as text, and a hand-written file is entitled to leave them out.
+  if (typeof data.name !== 'string') data.name = 'Untitled';
+  if (typeof data.id !== 'string') data.id = 'untitled';
+  if (typeof data.brief !== 'string') data.brief = '';
   data.terrain ??= [];
   data.structures ??= [];
   data.spawns ??= { teams: [], enemies: [], objectives: [] };

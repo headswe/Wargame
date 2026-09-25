@@ -148,13 +148,25 @@ export class EditorDoc {
 
   /** Replace the whole document — opening a file, or starting a new one. */
   load(data: LevelData): void {
+    // Built before it is kept. Swapping the level in first meant a file that
+    // cannot be built left the editor holding it: the open failed, and every
+    // edit after that failed the same way until the page was reloaded.
+    const kept = {
+      data: this.data, committed: this.committed,
+      selection: this.selection, terrainKey: this.terrainKey,
+    };
     this.data = assignIds(structuredClone(data));
     this.committed = JSON.stringify(this.data);
-    this.past.length = 0;
-    this.future.length = 0;
     this.selection = EMPTY;
     this.terrainKey = '';
-    this.refresh();
+    try {
+      this.refresh();
+    } catch (error) {
+      Object.assign(this, kept);
+      throw error;
+    }
+    this.past.length = 0;
+    this.future.length = 0;
   }
 
   // -------------------------------------------------------------- selection

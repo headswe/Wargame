@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { EditorDoc } from '../src/editor/document.ts';
-import { type StructureOp, blankLevel, packRuns } from '../src/sim/world/level-data.ts';
+import { type StructureOp, blankLevel, migrate, packRuns } from '../src/sim/world/level-data.ts';
 import { Fabric } from '../src/sim/world/geometry.ts';
 
 function withWall(): { doc: EditorDoc; wall: StructureOp & { op: 'wall' } } {
@@ -98,4 +98,21 @@ test('pasting painted ground files it as ground', async () => {
   paste(doc, { x: 60, y: 60 });
   assert.equal(doc.data.structures.length, 0, 'painted ground was pasted among the structures');
   assert.equal(doc.data.terrain.filter((op) => op.op === 'surfacemap').length, 2);
+});
+
+test('a file that will not build leaves the open level alone', () => {
+  const doc = new EditorDoc({ ...blankLevel(), name: 'Mine' });
+  // No size: validation calls that an error, and the scene cannot be made.
+  const broken = migrate({ version: 2, name: 'Broken', terrain: [], structures: [] });
+  assert.throws(() => doc.load(broken));
+  assert.equal(doc.data.name, 'Mine');
+  doc.edit('rename', () => { doc.data.name = 'Still mine'; });
+  assert.equal(doc.undoLabel, 'rename', 'the editor could not make an edit after a failed open');
+});
+
+test('a hand-written file without a name or brief still reads as text', () => {
+  const data = migrate({ version: 2, size: { width: 50, height: 50 } });
+  assert.equal(typeof data.name, 'string');
+  assert.equal(typeof data.brief, 'string');
+  assert.equal(typeof data.id, 'string');
 });
