@@ -37,9 +37,22 @@ export class EditorDoc {
   scene: Scene;
   problems: Problem[] = [];
 
-  private past: string[] = [];
-  private future: string[] = [];
-  private pending: string | null = null;
+  private past: Snapshot[] = [];
+  private future: Snapshot[] = [];
+  /**
+   * The document as the undo stack last recorded it.
+   *
+   * Edits are compared against this rather than against a copy taken when
+   * `edit` is called, because most of the editor changes the level in place
+   * before it says anything: a drag moves the wall under the pointer as it
+   * goes and only calls `edit('move')` on release, and the inspector writes
+   * the new height straight onto the operation. A copy taken at that point
+   * already contains the change, finds nothing to record, and for as long as
+   * it worked that way no move, resize, sculpt, paint or property change could
+   * be undone — the next undo took out whatever came before it instead.
+   */
+  private committed: string;
+  private depth = 0;
   private listeners: ((doc: EditorDoc, what: ChangeKind) => void)[] = [];
 
   private terrainKey = '';
@@ -49,6 +62,7 @@ export class EditorDoc {
 
   constructor(data: LevelData) {
     this.data = assignIds(structuredClone(data));
+    this.committed = JSON.stringify(this.data);
     this.scene = this.build();
     this.problems = validateLevel(this.data);
   }
@@ -68,34 +82,34 @@ export class EditorDoc {
   /**
    * Make a change, with a label the author will recognise in the undo list.
    *
+   * Whatever has changed since the last recorded edit lands under this label,
+   * including changes already made in place — which is how a drag or a typed
+   * value is committed: change the level, then call this with nothing to do.
+   *
    * Nesting is allowed and collapses into the outermost edit, so a tool that
    * calls two helpers still lands in the undo stack once.
    */
   edit(label: string, change: () => void): void {
-    const outer = this.pending === null;
-    if (outer) this.pending = JSON.stringify(this.data);
+    this.depth++;
     try {
       change();
     } finally {
-      if (outer) {
-        const before = this.pending!;
-        this.pending = null;
-        if (JSON.stringify(this.data) !== before) {
-          this.past.push(before);
+      this.depth--;
+      if (this.depth === 0) {
+        const now = JSON.stringify(this.data);
+        if (now !== this.committed) {
+          this.past.push({ state: this.committed, label });
           if (this.past.length > 120) this.past.shift();
           this.future.length = 0;
-          this.labels.push(label);
-          if (this.labels.length > 120) this.labels.shift();
+          this.committed = now;
           this.refresh();
         }
       }
     }
   }
 
-  private labels: string[] = [];
-
   get undoLabel(): string | null {
-    return this.past.length > 0 ? this.labels[this.labels.length - 1] ?? 'edit' : null;
+    return this.past[this.past.length - 1]?.label ?? null;
   }
 
   get canRedo(): boolean {
@@ -105,18 +119,23 @@ export class EditorDoc {
   undo(): void {
     const previous = this.past.pop();
     if (previous === undefined) return;
-    this.future.push(JSON.stringify(this.data));
-    this.labels.pop();
-    this.data = assignIds(JSON.parse(previous) as LevelData);
-    this.pruneSelection();
-    this.refresh();
+    // The label travels with the step, so redoing it puts back the name as
+    // well as the change. Keeping labels in a list of their own let the two
+    // drift apart, and the undo button named an edit it was not about to undo.
+    this.future.push({ state: JSON.stringify(this.data), label: previous.label });
+    this.restore(previous.state);
   }
 
   redo(): void {
     const next = this.future.pop();
     if (next === undefined) return;
-    this.past.push(JSON.stringify(this.data));
-    this.data = assignIds(JSON.parse(next) as LevelData);
+    this.past.push({ state: JSON.stringify(this.data), label: next.label });
+    this.restore(next.state);
+  }
+
+  private restore(state: string): void {
+    this.data = assignIds(JSON.parse(state) as LevelData);
+    this.committed = JSON.stringify(this.data);
     this.pruneSelection();
     this.refresh();
   }
@@ -124,9 +143,9 @@ export class EditorDoc {
   /** Replace the whole document — opening a file, or starting a new one. */
   load(data: LevelData): void {
     this.data = assignIds(structuredClone(data));
+    this.committed = JSON.stringify(this.data);
     this.past.length = 0;
     this.future.length = 0;
-    this.labels.length = 0;
     this.selection = EMPTY;
     this.terrainKey = '';
     this.refresh();
@@ -160,9 +179,18 @@ export class EditorDoc {
 
   private pruneSelection(): void {
     const live = new Set(this.allOps().map((op) => op.id));
+    // A spawn marker is addressed by position in a list, so undoing the one
+    // that placed it leaves the selection pointing past the end — and the
+    // inspector, reading the defender it names, fell over on nothing.
+    const spawn = this.selection.spawn;
+    const s = this.data.spawns;
+    const exists = spawn !== null && (
+      spawn.kind === 'team' ? spawn.index < (s.teams[spawn.team]?.length ?? 0)
+        : spawn.kind === 'enemy' ? spawn.index < s.enemies.length
+          : spawn.index < s.objectives.length);
     this.selection = {
       ops: this.selection.ops.filter((id) => live.has(id)),
-      spawn: this.selection.spawn,
+      spawn: exists ? spawn : null,
     };
   }
 
@@ -247,3 +275,10 @@ export class EditorDoc {
 }
 
 export type ChangeKind = 'world' | 'selection';
+
+interface Snapshot {
+  /** The whole level, serialised. */
+  state: string;
+  /** What the author did to get from here to the next one. */
+  label: string;
+}

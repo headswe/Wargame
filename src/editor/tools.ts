@@ -287,21 +287,17 @@ export class ToolHost {
     switch (drag.kind) {
       case 'handle':
         doc.edit('move point', () => {});
-        doc.refresh();
         break;
       case 'radius':
         doc.edit('resize', () => {});
-        doc.refresh();
         break;
       case 'translate':
         if (drag.moved) {
           doc.edit('move', () => {});
-          doc.refresh();
         }
         break;
       case 'spawn':
         doc.edit('move spawn', () => {});
-        doc.refresh();
         break;
       case 'box': {
         this.box = null;
@@ -322,11 +318,9 @@ export class ToolHost {
         break;
       case 'sculpt':
         doc.edit('sculpt', () => {});
-        doc.refresh();
         break;
       case 'surface':
         doc.edit('paint ground', () => {});
-        doc.refresh();
         break;
       default:
         break;

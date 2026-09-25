@@ -112,6 +112,27 @@ const after = await page.evaluate(() => window.editor.doc.data.structures.at(-1)
 check('dragging a selected building moves it', Math.abs(after - before) > 8,
   `x ${before.toFixed(1)} → ${after.toFixed(1)}`);
 
+// --- and the move is its own step. For a long time it was not: a drag changed
+// the level before telling the undo stack, which then found nothing to record,
+// and ctrl+z took out the building instead of putting it back where it was.
+await page.keyboard.down('Control');
+await page.keyboard.press('z');
+await page.keyboard.up('Control');
+await page.waitForTimeout(500);
+const unmoved = await page.evaluate(() => ({
+  x: window.editor.doc.data.structures.at(-1).rect?.at.x,
+  structures: window.editor.doc.data.structures.length,
+}));
+check('undo takes back the move, and only the move',
+  unmoved.structures === redone.structures && Math.abs(unmoved.x - before) < 1e-6,
+  `${unmoved.structures} structures, x ${unmoved.x?.toFixed(1)}`);
+await page.keyboard.down('Control');
+await page.keyboard.down('Shift');
+await page.keyboard.press('z');
+await page.keyboard.up('Shift');
+await page.keyboard.up('Control');
+await page.waitForTimeout(500);
+
 // --- draw a wall, which needs two clicks rather than a drag
 await page.keyboard.press('w');
 const w1 = await at(70, 95);
