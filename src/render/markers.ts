@@ -365,7 +365,10 @@ export class Markers {
       if (unit.faction !== Faction.Player || unit.state === UnitState.Dead) continue;
       for (const [enemyId, memory] of unit.memory) {
         const enemy = sim.units.get(enemyId);
-        if (enemy && sim.canPlayerSee(enemy) && enemy.state === UnitState.Active) continue;
+        // Anyone in sight is drawn as himself, standing or not. Only the living
+        // were excused, so a man you had just dropped wore his own ghost ring
+        // for the next twelve seconds.
+        if (enemy && sim.canPlayerSee(enemy)) continue;
         if (memory.age > 12) continue;
         if (!remembered.has(enemyId)) remembered.set(enemyId, memory.pos);
       }

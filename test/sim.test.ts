@@ -25,6 +25,7 @@ import { Fabric, Solidity } from '../src/sim/world/geometry.ts';
 import { type Squad, freshMorale, planSlots } from '../src/sim/squads.ts';
 import { WEAPONS, makeUnit, resetUnitIds } from '../src/sim/units.ts';
 import { vec } from '../src/sim/math.ts';
+import { blankLevel, defineLevel } from '../src/sim/world/level-data.ts';
 
 test('a squad order puts operators somewhere better than the open', () => {
   const sim = new Sim(STEPOVE, 11);
@@ -160,4 +161,14 @@ test('a wall you cannot shoot over says so', () => {
     plan.slots.every((s) => !s.canFire && s.fire === 0),
     'a solid wall at head height is a place to hide, and the plan has to admit it',
   );
+});
+
+test('a level with one team names its defence from one', () => {
+  // The editor's blank level starts with a single team. Hostile squads were
+  // numbered by assuming three player teams ahead of them, so this one's
+  // defence came out as HOSTILE -1.
+  const sim = new Sim(defineLevel(blankLevel()), 1);
+  const hostile = sim.squads.filter((s) => s.faction === Faction.Hostile);
+  assert.ok(hostile.length > 0);
+  assert.deepEqual(hostile.map((s) => s.name), hostile.map((_, i) => `HOSTILE ${i + 1}`));
 });

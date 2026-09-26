@@ -154,7 +154,6 @@ export function renderInspector(host: HTMLElement, doc: EditorDoc): void {
         enemy as unknown as Record<string, unknown>,
         () => {
           doc.edit('change defender', () => {});
-          doc.refresh();
         },
       );
       host.append(row);
@@ -181,7 +180,6 @@ export function renderInspector(host: HTMLElement, doc: EditorDoc): void {
   for (const f of fieldsFor(op)) {
     host.append(field(f, op as unknown as Record<string, unknown>, () => {
       doc.edit(`change ${f.label}`, () => {});
-      doc.refresh();
     }));
   }
 
@@ -275,7 +273,6 @@ function openingsPanel(
   const list = op.openings ?? [];
   const commit = (label: string): void => {
     doc.edit(label, () => {});
-    doc.refresh();
     renderInspector(document.getElementById('inspector')!, doc);
   };
 

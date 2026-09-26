@@ -90,9 +90,9 @@ await page.waitForTimeout(12000);
 s = await snap();
 const players = s.units.filter(u => u.faction === 0);
 const hostiles = s.units.filter(u => u.faction === 1);
-console.log(`t=${s.time}s  standing ${players.filter(u=>u.state===0).length}/12  hostiles ${hostiles.filter(u=>u.state===0).length}/10  contacts ${players.reduce((a,u)=>a+u.visible,0)}`);
+console.log(`t=${s.time}s  standing ${players.filter(u=>u.state===0).length}/${players.length}  hostiles ${hostiles.filter(u=>u.state===0).length}/${hostiles.length}  contacts ${players.reduce((a,u)=>a+u.visible,0)}`);
 console.log('suppressed operators:', players.filter(u => u.suppression > 0.3).map(u => `${u.name} ${u.suppression}`).join(', ') || 'none');
-console.log('posted in cover    :', players.filter(u => u.inCover).length + '/12');
+console.log('posted in cover    :', players.filter(u => u.inCover).length + `/${players.length}`);
 await page.screenshot({ path: `${OUT}/04-firefight.png` });
 
 // Zoom in for a close read of posture and the post markers.

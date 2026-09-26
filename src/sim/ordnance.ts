@@ -251,12 +251,23 @@ export function spend(u: Unit, kind: Ordnance): void {
  * Only ones that have landed count. A grenade still in the air has not told
  * you anything yet, and the two seconds it spends on the ground fizzing is
  * exactly the window the defender gets to make the decision.
+ *
+ * The nearest one to him, not the first in the list. Answering with whichever
+ * happened to be thrown first meant that with two on the ground — two teams
+ * posting one each into the same position — a man lying beside the second
+ * was told the danger was the first, found it out of range, and stayed put.
  */
-export function dangerFrom(live: InFlight[], faction: Faction): Vec2 | null {
+export function dangerFrom(live: InFlight[], faction: Faction, near: Vec2): Vec2 | null {
+  let nearest: Vec2 | null = null;
+  let best = Infinity;
   for (const o of live) {
     if (o.kind !== Ordnance.Frag || !o.landed) continue;
     if (o.faction === faction) continue;
-    return o.to;
+    const d = dist(o.to, near);
+    if (d < best) {
+      best = d;
+      nearest = o.to;
+    }
   }
-  return null;
+  return nearest;
 }

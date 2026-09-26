@@ -195,10 +195,14 @@ export class Sim implements SimContext {
    */
   private spawnHostiles(): void {
     let index = 0;
+    // Counted rather than derived from how many squads came before: that
+    // assumed three player teams, and a level with one — the editor's blank
+    // level, for a start — called its defence HOSTILE -1.
+    let hostileSquads = 0;
     for (const group of clusterSpawns(this.scene.spawns.enemies)) {
       const squad: Squad = {
         id: this.squads.length,
-        name: `HOSTILE ${this.squads.length - TEAM_NAMES.length + 1}`,
+        name: `HOSTILE ${++hostileSquads}`,
         faction: Faction.Hostile,
         memberIds: [],
         order: null,

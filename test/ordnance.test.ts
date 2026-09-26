@@ -10,7 +10,7 @@ import { Scene } from '../src/sim/world/scene.ts';
 import { revetment } from '../src/sim/world/builder.ts';
 import { Fabric, Solidity } from '../src/sim/world/geometry.ts';
 import { Stature } from '../src/sim/world/occlusion.ts';
-import { Ordnance, canThrow, launch, updateOrdnance } from '../src/sim/ordnance.ts';
+import { Ordnance, canThrow, dangerFrom, launch, updateOrdnance } from '../src/sim/ordnance.ts';
 import { hitChance, resolveAreaShot } from '../src/sim/combat.ts';
 
 /** A man behind a sandbag revetment, and a man twenty metres out in the open. */
@@ -399,4 +399,18 @@ test('smoke after contact costs more than smoke before it', () => {
     broken < screened,
     `popping smoke once already seen must cost something: ${broken}/12 vs ${screened}/12`,
   );
+});
+
+test('the grenade a man runs from is the one beside him', () => {
+  // Two on the ground at once, the far one thrown first. Answering with the
+  // first in the list told the man lying next to the second that the danger
+  // was twenty metres off, and he stayed where he was.
+  const { scene, attacker, defender } = bench();
+  const far = launch(scene, attacker, Ordnance.Frag, vec(10, 31));
+  const near = launch(scene, attacker, Ordnance.Frag, vec(31, 32));
+  far.landed = true;
+  near.landed = true;
+  assert.deepEqual(dangerFrom([far, near], defender.faction, defender.pos), near.to);
+  // His own side's are still not his to run from.
+  assert.equal(dangerFrom([far, near], attacker.faction, attacker.pos), null);
 });

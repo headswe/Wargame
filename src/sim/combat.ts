@@ -329,6 +329,9 @@ export function resolveShot(
       target.path = [];
       target.pathIndex = 0;
       target.coverSpot = null;
+      // As the other two places a man goes down do. Left set, the snapshot
+      // and anything reading it had a casualty still on his way somewhere.
+      target.slot = null;
       killedOrDowned = true;
     }
     effects.push({ kind: 'hit', at: impact, height: impactHeight, targetId: target.id, lethal: killedOrDowned });

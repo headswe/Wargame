@@ -65,7 +65,11 @@ export class Overlays {
   }
 
   private sample(scene: SimScene, data: LevelData): void {
-    const ground = sampleGround(scene, data.spawns.enemies.map((e) => e.pos));
+    // The walkable layer paints walkability and nothing else, and it keeps no
+    // stats, so it has no use for the sightline sweep — which is nearly all of
+    // the cost and was being paid again after every edit.
+    const defenders = this.mode === 'walkable' ? [] : data.spawns.enemies.map((e) => e.pos);
+    const ground = sampleGround(scene, defenders);
     this.cols = ground.cols;
     this.rows = ground.rows;
     this.walkable = ground.walkable;

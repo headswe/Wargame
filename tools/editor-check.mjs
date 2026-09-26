@@ -112,6 +112,27 @@ const after = await page.evaluate(() => window.editor.doc.data.structures.at(-1)
 check('dragging a selected building moves it', Math.abs(after - before) > 8,
   `x ${before.toFixed(1)} → ${after.toFixed(1)}`);
 
+// --- and the move is its own step. For a long time it was not: a drag changed
+// the level before telling the undo stack, which then found nothing to record,
+// and ctrl+z took out the building instead of putting it back where it was.
+await page.keyboard.down('Control');
+await page.keyboard.press('z');
+await page.keyboard.up('Control');
+await page.waitForTimeout(500);
+const unmoved = await page.evaluate(() => ({
+  x: window.editor.doc.data.structures.at(-1).rect?.at.x,
+  structures: window.editor.doc.data.structures.length,
+}));
+check('undo takes back the move, and only the move',
+  unmoved.structures === redone.structures && Math.abs(unmoved.x - before) < 1e-6,
+  `${unmoved.structures} structures, x ${unmoved.x?.toFixed(1)}`);
+await page.keyboard.down('Control');
+await page.keyboard.down('Shift');
+await page.keyboard.press('z');
+await page.keyboard.up('Shift');
+await page.keyboard.up('Control');
+await page.waitForTimeout(500);
+
 // --- draw a wall, which needs two clicks rather than a drag
 await page.keyboard.press('w');
 const w1 = await at(70, 95);
@@ -122,6 +143,22 @@ await page.mouse.click(w2.x, w2.y);
 await page.waitForTimeout(500);
 const walled = await state();
 check('a wall takes two clicks', walled.structures === redone.structures + 1);
+
+// --- two obstacles, each sized by its own drag. New operations used to have no
+// id until the next undo, so the second drag found the first obstacle by its
+// missing id and resized that one instead, and nothing just placed could be
+// selected.
+await page.keyboard.press('o');
+await dragWorld(110, 100, 113, 100);
+await dragWorld(128, 100, 131, 100);
+const placed = await page.evaluate(() => {
+  const doc = window.editor.doc;
+  const [first, second] = doc.data.structures.slice(-2);
+  return { first: first.radius, second: second.radius, selected: doc.selection.ops[0] === second.id };
+});
+check('each obstacle is sized by its own drag, and is the one selected',
+  Math.abs(placed.first - 3) < 0.3 && Math.abs(placed.second - 3) < 0.3 && placed.selected,
+  `radii ${placed.first.toFixed(1)}, ${placed.second.toFixed(1)}, selected: ${placed.selected}`);
 
 // --- the analysis overlay
 await page.selectOption('#overlay', 'fire');

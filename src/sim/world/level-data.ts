@@ -267,11 +267,29 @@ export function applyLevel(scene: Scene, data: LevelData): void {
 
 let nextOpId = 1;
 
-/** Every operation gets a stable handle, so an editor can follow one across edits. */
+/**
+ * Every operation gets a stable handle, so an editor can follow one across edits.
+ *
+ * A fresh id is checked against every id already in the level, not only the
+ * ones met so far. The counter is per session and a level carries ids from
+ * whichever session wrote it, so a new operation appended to a loaded level
+ * was routinely handed an id an existing one already had.
+ */
 export function assignIds(data: LevelData): LevelData {
+  const taken = new Set<string>();
+  for (const op of data.terrain) if (op.id) taken.add(op.id);
+  for (const op of data.structures) if (op.id) taken.add(op.id);
+
   const seen = new Set<string>();
   const stamp = (op: OpMeta): void => {
-    if (!op.id || seen.has(op.id)) op.id = `op${nextOpId++}`;
+    if (!op.id || seen.has(op.id)) {
+      let id: string;
+      do {
+        id = `op${nextOpId++}`;
+      } while (taken.has(id));
+      taken.add(id);
+      op.id = id;
+    }
     seen.add(op.id);
   };
   for (const op of data.terrain) stamp(op);
@@ -323,6 +341,11 @@ export function migrate(raw: unknown): LevelData {
   // Format 0 is anything written before levels carried a version at all: the
   // shape is already right, it simply never said so.
   data.version = LEVEL_FORMAT;
+  // Everything that shows a level — the picker, the editor, the HUD — treats
+  // these as text, and a hand-written file is entitled to leave them out.
+  if (typeof data.name !== 'string') data.name = 'Untitled';
+  if (typeof data.id !== 'string') data.id = 'untitled';
+  if (typeof data.brief !== 'string') data.brief = '';
   data.terrain ??= [];
   data.structures ??= [];
   data.spawns ??= { teams: [], enemies: [], objectives: [] };
@@ -355,7 +378,8 @@ export interface Problem {
   message: string;
 }
 
-const TERRAIN_OPS = new Set([
+/** Which list an operation belongs in. The editor's clipboard sorts by this too. */
+export const TERRAIN_OPS: ReadonlySet<string> = new Set([
   'heightmap', 'rolling', 'mound', 'bank', 'cut', 'road', 'paint', 'crater', 'surfacemap',
 ]);
 const STRUCTURE_OPS = new Set(['building', 'wall', 'revetment', 'hedgerow', 'obstacle']);

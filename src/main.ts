@@ -167,8 +167,13 @@ class Mission {
       onSuppress: () => this.suppress(),
     });
 
-    // Open looking at the start line, not at the middle of the map.
-    const spawn = this.sim.scene.spawns.teams[1][0] ?? { x: 85, y: 122 };
+    // Open looking at the start line, not at the middle of the map: the middle
+    // team if there is one, else whichever team has anybody in it. Reading the
+    // second team outright threw on any level with only one — the editor's
+    // blank level among them — and a playtest opened on an error.
+    const { teams } = this.sim.scene.spawns;
+    const spawn = teams[1]?.[0] ?? teams.find((team) => team.length > 0)?.[0]
+      ?? { x: this.sim.scene.width / 2, y: this.sim.scene.height - 10 };
     iso.jumpTo(spawn.x, spawn.y - 18);
 
     for (const unit of this.sim.unitList) this.lastState.set(unit.id, unit.state);
@@ -363,6 +368,10 @@ class Mission {
         this.effects.ingest(this.sim.effects, (x, y) => this.sim.isVisible(x, y));
         this.accumulator -= TICK;
         ticks++;
+        // A finished mission stops stepping, and stops clearing its effects
+        // with it, so the steps left in this frame would each ingest the last
+        // one's shots and blasts again.
+        if (this.sim.missionState !== MissionState.InProgress) break;
       }
       if (ticks === MAX_TICKS_PER_FRAME) this.accumulator = 0;
     }
